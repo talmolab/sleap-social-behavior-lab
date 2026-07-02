@@ -42,6 +42,25 @@ cell updates automatically. To just *view* a notebook without editing:
 uv run marimo run notebooks/03_clustering.py
 ```
 
+## Run in the browser (molab)
+
+No local install required — [molab](https://molab.marimo.io) runs these notebooks on a free
+cloud kernel. It uses a **real Python** environment (`uv`-managed), so `numba` / `umap-learn` /
+`hdbscan` install and run normally.
+
+1. Push this repo to GitHub.
+2. In molab, create a GitHub-synced notebook from this repo. Confirm the file tree shows
+   `notebooks/`, `course/`, and `data/` together — the notebooks import `course_utils` from
+   `course/` and load the bundled `data/`, so all three must be present.
+3. Open `notebooks/01_load_sleap.py` and run. Each notebook declares its dependencies inline
+   (a PEP&nbsp;723 `# /// script` block at the top, pinned to match `pyproject.toml`), so molab
+   installs the correct versions automatically.
+
+> The WebAssembly export (`marimo export html-wasm`) and GitHub-Pages hosting will **not** work
+> for this course: `numba`, `umap-learn`, and `hdbscan` have no in-browser (Pyodide) builds, and
+> notebook 03 onward depends on them. Use molab (or a self-hosted `marimo edit`) for a browser
+> experience with a real kernel.
+
 ## What's in `data/`
 
 Small, self-contained, no video required (everything renders skeletons on a blank canvas):

@@ -1,3 +1,21 @@
+# /// script
+# requires-python = ">=3.10,<3.13"
+# dependencies = [
+#     "marimo>=0.9",
+#     "numpy>=1.24,<2.1",
+#     "scipy>=1.11",
+#     "pandas>=2.0",
+#     "scikit-learn>=1.3",
+#     "numba>=0.59",
+#     "umap-learn>=0.5.6",
+#     "hdbscan>=0.8.36",
+#     "plotly>=5.20",
+#     "imageio>=2.34",
+#     "pillow>=10.0",
+#     "sleap-io>=0.4",
+# ]
+# ///
+
 import marimo
 
 __generated_with = "0.23.13"
