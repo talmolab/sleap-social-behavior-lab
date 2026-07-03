@@ -66,6 +66,27 @@ tailscale funnel 7860
 Share the printed HTTPS URL. More CPU/RAM and no idle-sleep, but you keep the process running
 (under `tmux` / `systemd`) for the duration of the course.
 
+## Option C — molab, one link per lesson (zero setup, no account push)
+
+[molab](https://molab.marimo.io) is marimo's own free cloud. There's no build and nothing to
+host — but each molab notebook is a single file, so this gives students **one link per lesson**
+rather than one course site. The notebooks **self-bootstrap** (they download `course_utils.py`
+and the bundled data from this repo on first run), so there is nothing to upload.
+
+For each lesson: open <https://molab.marimo.io>, create a notebook **from a GitHub URL**, and
+paste the lesson's URL (use the raw URL if molab asks for the file directly):
+
+- 01 — `https://github.com/Elmaestrotango/sleap-social-behavior-lab/blob/main/notebooks/01_load_sleap.py`
+- 02 — `.../notebooks/02_features.py`
+- 03 — `.../notebooks/03_clustering.py`
+- 04 — `.../notebooks/04_rank_stats.py`
+- 05 — `.../notebooks/05_label_exemplars.py`
+- 06 — `.../notebooks/06_mlp_inference.py`
+
+Give students the six molab links in order. First run in each notebook installs the pinned
+packages (from the inline PEP 723 block) and downloads the data — a minute or two — then it's
+cached for that session. Note molab notebooks are public-but-undiscoverable by default.
+
 ## Adding a lesson / changing order
 
 Edit the `_LESSONS` list in `serve.py` (the `/NN` path sets the URL and order) and the table in

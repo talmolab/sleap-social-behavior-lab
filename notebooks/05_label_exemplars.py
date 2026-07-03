@@ -55,17 +55,32 @@ def _():
     import sys
     import numpy as np
 
+    import urllib.request
+
+    _RAW = os.environ.get(
+        "COURSE_REPO_RAW",
+        "https://raw.githubusercontent.com/Elmaestrotango/sleap-social-behavior-lab/main",
+    )
+
     def _find_root():
         p = os.getcwd()
         for _ in range(6):
             if os.path.isdir(os.path.join(p, "course")) and os.path.isdir(os.path.join(p, "data")):
                 return p
             p = os.path.dirname(p)
-        return os.getcwd()
+        return None
 
-    ROOT = _find_root()
+    # On a bare cloud notebook (e.g. molab) there is no repo checkout: fetch course_utils.py, then
+    # let cu.bootstrap() download the bundled data on first use.
+    ROOT = _find_root() or os.getcwd()
+    _cu = os.path.join(ROOT, "course", "course_utils.py")
+    if not os.path.exists(_cu):
+        os.makedirs(os.path.dirname(_cu), exist_ok=True)
+        urllib.request.urlretrieve(_RAW + "/course/course_utils.py", _cu)
     sys.path.insert(0, os.path.join(ROOT, "course"))
     import course_utils as cu
+
+    ROOT, DATA, SCRATCH = cu.bootstrap()
 
     events = cu.load_events(os.path.join(ROOT, "data", "train_events.npz"))
     SCRATCH = os.path.join(ROOT, "data", "_scratch")

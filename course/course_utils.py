@@ -14,8 +14,71 @@ Skeleton (15 nodes, star topology with two hubs: head=1, TTI=11):
 """
 from __future__ import annotations
 import io
+import os
 import base64
+import urllib.request
 import numpy as np
+
+
+# ============================================================================ asset bootstrap
+# So a single notebook file can run anywhere — including a bare cloud notebook (molab) with no
+# repo checkout. When this module or the bundled data aren't on disk, they're fetched from the
+# public GitHub repo's raw endpoint. Override the source with $COURSE_REPO_RAW.
+REPO_RAW = os.environ.get(
+    "COURSE_REPO_RAW",
+    "https://raw.githubusercontent.com/Elmaestrotango/sleap-social-behavior-lab/main",
+)
+DATA_FILES = [
+    "data/train_events.npz",
+    "data/heldout_events.npz",
+    "data/cohort_meta.csv",
+    "data/answer_key.csv",
+    "data/raw_slp/example_pre.slp",
+    "data/raw_slp/example_dep.slp",
+    "data/raw_slp/example_post.slp",
+    "data/raw_slp/example_heldout.slp",
+]
+
+
+def find_root(start=None):
+    """Walk up from `start` (or cwd) for a folder holding both course/ and data/; else None."""
+    p = start or os.getcwd()
+    for _ in range(6):
+        if os.path.isdir(os.path.join(p, "course")) and os.path.isdir(os.path.join(p, "data")):
+            return p
+        p = os.path.dirname(p)
+    return None
+
+
+def data_path(rel, root=None):
+    """Local path to a repo-relative file (e.g. 'data/train_events.npz'), downloading it from
+    REPO_RAW if it isn't already on disk. Lets a notebook run with no repo checkout."""
+    rel = rel.replace("\\", "/").lstrip("/")
+    root = root or find_root() or os.getcwd()
+    dst = os.path.join(root, rel)
+    if not os.path.exists(dst):
+        os.makedirs(os.path.dirname(dst) or ".", exist_ok=True)
+        urllib.request.urlretrieve(REPO_RAW + "/" + rel, dst)
+    return dst
+
+
+def ensure_data(root=None):
+    """Make sure every bundled data file is present under root/data (download what's missing).
+    Returns the data directory path."""
+    root = root or find_root() or os.getcwd()
+    for rel in DATA_FILES:
+        data_path(rel, root)
+    return os.path.join(root, "data")
+
+
+def bootstrap():
+    """Make the course runnable from a bare notebook (e.g. molab): locate the repo layout (or fall
+    back to the cwd), download the bundled data if absent, and return (ROOT, DATA, SCRATCH)."""
+    root = find_root() or os.getcwd()
+    data = ensure_data(root)
+    scratch = os.path.join(data, "_scratch")
+    os.makedirs(scratch, exist_ok=True)
+    return root, data, scratch
 
 # ----------------------------------------------------------------------------- skeleton
 NODE_NAMES = ["nose", "head", "L_ear", "L_shoulder", "neck", "R_ear", "R_shoulder",
@@ -45,6 +108,8 @@ def load_events(npz_path):
        event_key   (N,) str        stable id  cohort|stem|pair|contact_start.
        category    (N,) str        registry label if any ('aggression', 'mlp_fp', ...), else ''.
        agg_label   (N,) int        1 if category == 'aggression' else 0  (ground truth)."""
+    if not os.path.exists(npz_path):                 # bare notebook: pull it from the repo
+        npz_path = data_path("data/" + os.path.basename(npz_path))
     z = np.load(npz_path, allow_pickle=True)
     d = {k: z[k] for k in z.files}
     d["kp"] = d["kp"].astype(np.float32)

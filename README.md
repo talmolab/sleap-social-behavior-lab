@@ -53,11 +53,12 @@ them, so a static WASM site would break at the clustering notebook.
   six lessons in order under a single URL, each with its own isolated kernel per visitor. Try it
   with `uv run python serve.py` (→ <http://localhost:7860>), then host it free on a Hugging Face
   Docker Space or self-host behind a tunnel. See [`DEPLOY.md`](DEPLOY.md).
-- **One notebook at a time.** [molab](https://molab.marimo.io) runs a single notebook on a free
-  cloud kernel; each notebook declares its dependencies inline (a PEP&nbsp;723 `# /// script`
-  block pinned to `pyproject.toml`), so `uv` installs the right versions automatically. You upload
-  `course/` and `data/` alongside the notebook. Fine for a quick share, but it's per-notebook
-  links, not one course site.
+- **One notebook at a time (molab).** [molab](https://molab.marimo.io) runs a single notebook on
+  a free cloud kernel. Point it at a lesson's GitHub URL and run — each notebook declares its
+  dependencies inline (a PEP&nbsp;723 `# /// script` block pinned to `pyproject.toml`) and
+  **self-bootstraps**: if it can't find a local checkout it downloads `course_utils.py` and the
+  bundled data straight from this repo, so there's nothing to upload. It's one link *per lesson*
+  rather than one course site — students open `01`…`06` in turn. See [`DEPLOY.md`](DEPLOY.md).
 
 ## What's in `data/`
 
