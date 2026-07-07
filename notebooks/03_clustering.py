@@ -12,7 +12,6 @@
 #     "plotly>=5.20",
 #     "imageio>=2.34",
 #     "pillow>=10.0",
-#     "sleap-io>=0.4",
 # ]
 # ///
 
@@ -28,7 +27,7 @@ def _():
     return (mo,)
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(mo):
     mo.md(
         r"""
@@ -37,9 +36,11 @@ def _(mo):
         We now have a 19-D feature vector per event. **Unsupervised clustering** asks: without any
         labels, do the events fall into recurring *types* (sniff, chase, fight, perch, pass-by)?
 
-        The standard recipe — and every knob that matters — is below. **Drag any slider and the whole
-        map re-computes.** Watch how the number and shape of clusters depends on your choices; there
-        is no single "correct" clustering, and understanding that is the point.
+        The standard recipe — and every knob that matters — is below. The cheap steps (PCA,
+        residualization) update live as you drag; **UMAP is expensive, so it runs only when you
+        click _Compute map_** (dragging it live would re-run a ~30 s compile over and over and hang
+        the page). Watch how the number and shape of clusters depends on your choices; there is no
+        single "correct" clustering, and understanding that is the point.
 
         `standardize → PCA → residualize → UMAP → HDBSCAN`
         """
@@ -87,6 +88,14 @@ def _():
 
 
 @app.cell
+def _(cu):
+    # Precomputed UMAP sweep + default embedding (tools/build_umap_sweep.py). Used to (1) show the
+    # parameter effect instantly and (2) render a map on load without a live ~30s UMAP compile.
+    sweep = cu.load_umap_sweep()
+    return (sweep,)
+
+
+@app.cell(hide_code=True)
 def _(mo):
     mo.md(
         r"""
@@ -103,7 +112,8 @@ def _(mo):
 
 @app.cell
 def _(mo):
-    pca_k = mo.ui.slider(3, 15, value=10, step=1, label="PCA components (k)", full_width=True)
+    pca_k = mo.ui.slider(3, 15, value=10, step=1, label="PCA components (k)", full_width=True,
+                         debounce=True)
     pca_k
     return (pca_k,)
 
@@ -128,7 +138,7 @@ def _(evr, go, np):
     return
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(mo):
     mo.md(
         r"""
@@ -152,7 +162,7 @@ def _(mo):
     return (drop_pcs,)
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(mo):
     mo.md(
         r"""
@@ -169,6 +179,35 @@ def _(mo):
         - **`min_dist`** — how tightly points may pack (small = tight, well-separated blobs).
 
         *Coordinates are not meaningful distances — only who-is-near-whom is.*
+
+        ### See the two knobs at work
+        The grid below is **precomputed** — the *same* 1500 events embedded across a
+        `n_neighbors` × `min_dist` sweep, each panel colored red where the event is aggression.
+        Read it row-by-row (locality) and column-by-column (packing) to build intuition *before*
+        you run your own. (UMAP is CPU-only — a GPU kernel won't speed it up — and the first live
+        run compiles for ~30 s, so we don't recompute it on every slider tick.)
+        """
+    )
+    return
+
+
+@app.cell
+def _(cu, sweep):
+    cu.sweep_grid_fig(
+        sweep["emb_grid"], sweep["nn_values"], sweep["md_values"],
+        color_key=sweep["agg_label"].astype(int),
+        palette={0: "#b0b0b0", 1: "#d62728"}, names={0: "not agg", 1: "aggression"})
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(
+        r"""
+        ### Now run your own
+        Set `n_neighbors` and `min_dist`, then click **Compute map**. The first compute takes
+        ~30 s (numba compiling UMAP); after that each is ~3 s. Until you submit, the map below shows
+        the course-default embedding.
         """
     )
     return
@@ -176,13 +215,32 @@ def _(mo):
 
 @app.cell
 def _(mo):
-    n_neighbors = mo.ui.slider(5, 50, value=15, step=1, label="n_neighbors")
-    min_dist = mo.ui.slider(0.0, 0.99, value=0.0, step=0.05, label="min_dist")
-    mo.vstack([n_neighbors, min_dist])
-    return min_dist, n_neighbors
+    _nn = mo.ui.slider(5, 50, value=15, step=1, label="n_neighbors", debounce=True)
+    _md = mo.ui.slider(0.0, 0.99, value=0.0, step=0.05, label="min_dist", debounce=True)
+    umap_form = (mo.md("{n_neighbors}\n\n{min_dist}")
+                 .batch(n_neighbors=_nn, min_dist=_md)
+                 .form(submit_button_label="Compute map"))
+    umap_form
+    return (umap_form,)
 
 
 @app.cell
+def _(cu, drop_pcs, scores, sweep, umap_form):
+    if umap_form.value is None:                       # no submit yet: show precomputed default map
+        _di, _dj = int(sweep["default_ij"][0]), int(sweep["default_ij"][1])
+        emb = sweep["emb_grid"][_di, _dj]
+        emb_src = (f"precomputed default (n_neighbors={int(sweep['nn_values'][_di])}, "
+                   f"min_dist={float(sweep['md_values'][_dj]):g}) — click **Compute map** to run your own")
+    else:                                             # submitted: run UMAP once with the chosen knobs
+        _v = umap_form.value
+        _res = cu.residualize(scores, [int(x) for x in drop_pcs.value])
+        emb = cu.run_umap(_res, n_neighbors=int(_v["n_neighbors"]), min_dist=float(_v["min_dist"]),
+                          seed=42)
+        emb_src = f"live UMAP · n_neighbors={int(_v['n_neighbors'])}, min_dist={float(_v['min_dist']):g}"
+    return emb, emb_src
+
+
+@app.cell(hide_code=True)
 def _(mo):
     mo.md(
         r"""
@@ -192,7 +250,8 @@ def _(mo):
         every point into a cluster. It uses the *mutual-reachability* distance
         $d_{\text{mreach}}(a,b)=\max\!\bigl(\text{core}_k(a),\text{core}_k(b),d(a,b)\bigr)$
         and keeps clusters that persist across density thresholds.
-        **`min_cluster_size`** sets the smallest group you'll accept.
+        **`min_cluster_size`** sets the smallest group you'll accept. (This step is fast, so it
+        re-runs live as you drag.)
         """
     )
     return
@@ -200,17 +259,10 @@ def _(mo):
 
 @app.cell
 def _(mo):
-    min_cluster_size = mo.ui.slider(10, 80, value=15, step=1, label="min_cluster_size", full_width=True)
+    min_cluster_size = mo.ui.slider(10, 80, value=15, step=1, label="min_cluster_size",
+                                    full_width=True, debounce=True)
     min_cluster_size
     return (min_cluster_size,)
-
-
-@app.cell
-def _(cu, drop_pcs, min_dist, n_neighbors, scores):
-    _drop = [int(x) for x in drop_pcs.value]
-    _res = cu.residualize(scores, _drop)
-    emb = cu.run_umap(_res, n_neighbors=n_neighbors.value, min_dist=min_dist.value, seed=42)
-    return (emb,)
 
 
 @app.cell
@@ -228,7 +280,7 @@ def _(mo):
 
 
 @app.cell
-def _(color_by, cu, emb, events, go, labels, np):
+def _(color_by, cu, emb, emb_src, events, go, labels, np):
     _mode = color_by.value
     if _mode == "cluster":
         _key = labels.astype(int)
@@ -257,14 +309,15 @@ def _(color_by, cu, emb, events, go, labels, np):
                            marker=dict(size=5, opacity=0.7, color=_pal.get(g)),
                            text=[events["category"][i] or "" for i in np.where(m)[0]],
                            hovertemplate="%{text}<extra></extra>")
-    _fig.update_layout(template="plotly_white", height=560, title=f"UMAP embedding — colored by {_mode}",
-                       xaxis_title="UMAP-1", yaxis_title="UMAP-2", margin=dict(l=10, r=10, t=40, b=10))
+    _fig.update_layout(template="plotly_white", height=560,
+                       title=f"UMAP embedding ({emb_src}) — colored by {_mode}",
+                       xaxis_title="UMAP-1", yaxis_title="UMAP-2", margin=dict(l=10, r=10, t=60, b=10))
     _fig
     return
 
 
-@app.cell
-def _(labels, mo, np):
+@app.cell(hide_code=True)
+def _(labels, mo):
     _n_clusters = len([c for c in set(labels) if c >= 0])
     _noise = float((labels == -1).mean())
     mo.md(

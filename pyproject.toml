@@ -16,8 +16,13 @@ dependencies = [
     "plotly>=5.20",
     "imageio>=2.34",
     "pillow>=10.0",
-    "sleap-io>=0.4",
 ]
+
+[project.optional-dependencies]
+# Instructors only: sleap-io pulls a heavy chain (pynwb, skia-python, ...) and is needed just to
+# regenerate the bundled data (tools/build_dataset.py, tools/decode_example_slp.py). The course
+# notebooks load pre-decoded .npz, so students never install it.  ->  uv sync --extra build
+build = ["sleap-io>=0.4"]
 
 [tool.marimo.runtime]
 auto_instantiate = true

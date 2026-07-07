@@ -12,7 +12,6 @@
 #     "plotly>=5.20",
 #     "imageio>=2.34",
 #     "pillow>=10.0",
-#     "sleap-io>=0.4",
 # ]
 # ///
 
@@ -28,7 +27,7 @@ def _():
     return (mo,)
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(mo):
     mo.md(
         r"""
@@ -94,110 +93,83 @@ def _():
     return DATA, cu, go, np, os
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(mo):
     mo.md(
         r"""
         ## Read a real `.slp` file
 
-        We load a short clip with [`sleap-io`](https://io.sleap.ai). The `.slp` carries three
-        things we care about: the **skeleton** (which nodes exist and how they connect), the
-        **tracks** (one per animal identity), and the per-frame **keypoints**.
+        A `.slp` carries three things we care about: the **skeleton** (which nodes exist and how
+        they connect), the **tracks** (one per animal identity), and the per-frame **keypoints**.
+        You read one with [`sleap-io`](https://io.sleap.ai):
+
+        ```python
+        import sleap_io as sio
+        labels = sio.load_slp("example_dep.slp")
+        skeleton = labels.skeletons[0]          # nodes + edges
+        # put each instance in its FIXED track slot so slot m is always the same animal:
+        kp = labels.numpy()                     # (frames, tracks, nodes, xy)
+        ```
+
+        To keep this course installable on any cloud kernel, we ran exactly that offline
+        (`tools/decode_example_slp.py`) and saved the resulting arrays to a tiny `.npz`, so the
+        notebook needs no heavy pose-IO dependency. The keypoints below are the real decoded clip.
         """
     )
     return
 
 
 @app.cell
-def _(DATA, np, os):
-    import sleap_io as sio
-
-    _cands = [os.path.join(DATA, "raw_slp", f) for f in
-              ("example_dep.slp", "example_pre.slp", "example_post.slp", "example_heldout.slp")]
-    slp_path = next((p for p in _cands if os.path.exists(p)), None)
-
-    labels = sio.load_slp(slp_path) if slp_path else None
-    if labels is not None:
-        # build a compact array directly from the labeled frames (frame, mouse, node, xy)
-        slp_kp = np.stack([lf.numpy() for lf in labels.labeled_frames]).astype(np.float32)
-        skel = labels.skeletons[0]
-        node_names = [n.name for n in skel.nodes]
-        slp_edges = [(node_names.index(e.source.name), node_names.index(e.destination.name))
-                     for e in skel.edges]
-    else:
-        slp_kp, skel, node_names, slp_edges = None, None, [], []
-    return labels, node_names, skel, slp_edges, slp_kp, slp_path
+def _(cu):
+    # The real decoded clip: (frames, tracks, nodes, xy) with each animal in a FIXED track slot.
+    _slp = cu.load_slp_demo()
+    slp_kp = _slp["kp"]
+    node_names = _slp["node_names"]
+    slp_edges = _slp["edges"]
+    slp_source = _slp["source"]
+    return node_names, slp_edges, slp_kp, slp_source
 
 
 @app.cell
-def _(labels, mo, node_names, slp_edges, slp_kp, slp_path):
-    if labels is None:
-        _out = mo.md("⚠️ No `.slp` found in `data/raw_slp/` — run `tools/trim_slp.py` (instructors).")
-    else:
-        _out = mo.md(
-            f"""
-            **Loaded** `{slp_path.split('/')[-1]}`
+def _(mo, node_names, slp_kp, slp_source):
+    mo.md(
+        f"""
+        **Loaded** `{slp_source}`
 
-            | property | value |
-            |---|---|
-            | frames in clip | {slp_kp.shape[0]} |
-            | mice (tracks) | {slp_kp.shape[1]} |
-            | nodes | {slp_kp.shape[2]} |
-            | array shape | `{tuple(slp_kp.shape)}` = (frames, mice, nodes, xy) |
+        | property | value |
+        |---|---|
+        | frames in clip | {slp_kp.shape[0]} |
+        | mice (tracks) | {slp_kp.shape[1]} |
+        | nodes | {slp_kp.shape[2]} |
+        | array shape | `{tuple(slp_kp.shape)}` = (frames, mice, nodes, xy) |
 
-            Nodes: {", ".join(f"`{i}:{n}`" for i, n in enumerate(node_names))}
+        Nodes: {", ".join(f"`{i}:{n}`" for i, n in enumerate(node_names))}
 
-            Each animal is one **track**. Notice we have *identities* here — track 0 stays track 0
-            across frames — but SLEAP's raw tracks can swap when animals huddle or cross. Resolving
-            identity reliably (here, to a dominance **rank**) is its own hard problem; the bundled
-            dataset has already been identity-corrected for you.
-            """
-        )
-    _out
+        Each animal is one **track**. Notice we have *identities* here — track 0 stays track 0
+        across frames — but SLEAP's raw tracks can swap when animals huddle or cross. Resolving
+        identity reliably (here, to a dominance **rank**) is its own hard problem; the bundled
+        dataset has already been identity-corrected for you.
+        """
+    )
     return
 
 
 @app.cell
 def _(mo, slp_kp):
-    frame_idx = mo.ui.slider(
-        0, (slp_kp.shape[0] - 1 if slp_kp is not None else 1), value=0, step=1,
-        label="frame", full_width=True,
-    )
-    frame_idx
+    frame_idx = mo.ui.slider(0, slp_kp.shape[0] - 1, value=0, step=1, label="frame",
+                             full_width=True)
     return (frame_idx,)
 
 
 @app.cell
-def _(cu, frame_idx, go, np, slp_edges, slp_kp):
-    def _skeleton_fig(kp_frame, edges):
-        # kp_frame: (mice, nodes, 2) in image pixels (y grows downward)
-        _colors = ["#d62728", "#1f77b4", "#2ca02c"]
-        _traces = []
-        for m in range(kp_frame.shape[0]):
-            kp = kp_frame[m]
-            ok = np.isfinite(kp).all(1)
-            ex, ey = [], []
-            for u, v in edges:
-                if ok[u] and ok[v]:
-                    ex += [kp[u, 0], kp[v, 0], None]
-                    ey += [kp[u, 1], kp[v, 1], None]
-            _traces.append(go.Scatter(x=ex, y=ey, mode="lines",
-                                      line=dict(color=_colors[m], width=2),
-                                      name=f"mouse {m}", hoverinfo="skip"))
-            _traces.append(go.Scatter(x=kp[ok, 0], y=kp[ok, 1], mode="markers",
-                                      marker=dict(color=_colors[m], size=7),
-                                      showlegend=False, hoverinfo="skip"))
-        f = go.Figure(_traces)
-        f.update_yaxes(autorange="reversed", scaleanchor="x", scaleratio=1)
-        f.update_layout(height=520, title="SLEAP skeletons — drag the frame slider",
-                        margin=dict(l=10, r=10, t=40, b=10), template="plotly_white")
-        return f
-
-    _skeleton_fig(slp_kp[frame_idx.value], slp_edges) if slp_kp is not None else None
+def _(cu, frame_idx, mo, slp_edges, slp_kp):
+    # Slider stacked directly above the figure, so the control sits next to what it drives (in the
+    # editor *and* in app mode). cu.skeleton_fig colors each mouse by its fixed track slot.
+    mo.vstack([frame_idx, cu.skeleton_fig(slp_kp[frame_idx.value], slp_edges)])
     return
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(mo):
     mo.md(
         r"""
@@ -252,7 +224,7 @@ def _(cu, ev_pick, events, mo):
     return
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(mo):
     mo.md(
         r"""

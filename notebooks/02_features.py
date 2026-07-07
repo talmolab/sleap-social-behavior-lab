@@ -12,7 +12,6 @@
 #     "plotly>=5.20",
 #     "imageio>=2.34",
 #     "pillow>=10.0",
-#     "sleap-io>=0.4",
 # ]
 # ///
 
@@ -28,7 +27,7 @@ def _():
     return (mo,)
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(mo):
     mo.md(
         r"""
@@ -94,7 +93,7 @@ def _():
     return cu, events, go, make_subplots, np
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(mo):
     mo.md(
         r"""
@@ -160,7 +159,7 @@ def _(cu, ev_sel, events, fr_sel, go, make_subplots, np):
     return
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(mo):
     mo.md(
         r"""
@@ -236,7 +235,7 @@ def _(X, cu, events, feat_pick, go):
     return
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(mo):
     mo.md(
         r"""

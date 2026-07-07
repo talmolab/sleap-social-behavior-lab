@@ -12,7 +12,6 @@
 #     "plotly>=5.20",
 #     "imageio>=2.34",
 #     "pillow>=10.0",
-#     "sleap-io>=0.4",
 # ]
 # ///
 
@@ -28,7 +27,7 @@ def _():
     return (mo,)
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(mo):
     mo.md(
         r"""

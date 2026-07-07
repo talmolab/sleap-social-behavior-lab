@@ -78,7 +78,10 @@ Small, self-contained, no video required (everything renders skeletons on a blan
 
 The bundle is produced from a lab pipeline by `tools/build_dataset.py` (+ `tools/trim_slp.py`),
 which require access to the source data and are **not** needed to run the course. See those files
-for exactly how each field was derived.
+for exactly how each field was derived. `tools/decode_example_slp.py` turns a raw `.slp` into the
+small `example_slp_decoded.npz` that notebook 01 loads (so students need no `sleap-io`). These
+tools need `sleap-io`, which is kept out of the default install — get it with `uv sync --extra
+build`.
 
 ## Skeleton
 

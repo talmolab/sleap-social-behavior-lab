@@ -33,10 +33,12 @@ DATA_FILES = [
     "data/heldout_events.npz",
     "data/cohort_meta.csv",
     "data/answer_key.csv",
-    "data/raw_slp/example_pre.slp",
-    "data/raw_slp/example_dep.slp",
-    "data/raw_slp/example_post.slp",
-    "data/raw_slp/example_heldout.slp",
+    # Notebook 01 loads this small pre-decoded clip instead of a raw .slp, so students never need
+    # sleap-io (a heavy install on bare cloud kernels). Regenerate with tools/decode_example_slp.py.
+    "data/raw_slp/example_slp_decoded.npz",
+    # Notebook 03: a precomputed UMAP parameter sweep + default embedding, so the map renders
+    # instantly instead of blocking ~30s on numba JIT. Regenerate with tools/build_umap_sweep.py.
+    "data/umap_sweep.npz",
 ]
 
 
@@ -114,6 +116,51 @@ def load_events(npz_path):
     d = {k: z[k] for k in z.files}
     d["kp"] = d["kp"].astype(np.float32)
     return d
+
+
+def load_slp_demo(root=None):
+    """Load the pre-decoded example SLEAP clip for notebook 01 (no sleap-io needed).
+
+    Produced from a real `.slp` by tools/decode_example_slp.py, which placed each instance in its
+    fixed **track slot** — so slot m is always the same animal (raw `LabeledFrame.numpy()` orders
+    instances per-frame, which makes the skeleton colors flicker while scrubbing). Returns a dict:
+        kp         (frames, tracks, nodes, 2) float32, NaN where a track is missing that frame
+        node_names (nodes,) str
+        edges      (E, 2) int   skeleton edges as (src_idx, dst_idx)
+        source     str          the .slp filename it came from
+    """
+    path = data_path("data/raw_slp/example_slp_decoded.npz", root)
+    z = np.load(path, allow_pickle=True)
+    return dict(kp=z["kp"].astype(np.float32), node_names=[str(n) for n in z["node_names"]],
+                edges=[(int(u), int(v)) for u, v in z["edges"]], source=str(z["source"]))
+
+
+def skeleton_fig(kp_frame, edges, colors=("#d62728", "#1f77b4", "#2ca02c"),
+                 title="SLEAP skeletons — drag the frame slider", height=520):
+    """Plotly figure of one frame's rank/track-colored skeletons on a blank canvas.
+
+    kp_frame: (mice, nodes, 2) in image pixels (y grows downward). Each mouse index keeps a fixed
+    color, so identities stay put as you scrub. Missing nodes/animals (NaN) are simply not drawn."""
+    import plotly.graph_objects as go
+    traces = []
+    for m in range(kp_frame.shape[0]):
+        kp = kp_frame[m]
+        ok = np.isfinite(kp).all(1)
+        ex, ey = [], []
+        for u, v in edges:
+            if ok[u] and ok[v]:
+                ex += [kp[u, 0], kp[v, 0], None]
+                ey += [kp[u, 1], kp[v, 1], None]
+        col = colors[m % len(colors)]
+        traces.append(go.Scatter(x=ex, y=ey, mode="lines", line=dict(color=col, width=2),
+                                 name=f"mouse {m}", hoverinfo="skip"))
+        traces.append(go.Scatter(x=kp[ok, 0], y=kp[ok, 1], mode="markers",
+                                 marker=dict(color=col, size=7), showlegend=False, hoverinfo="skip"))
+    f = go.Figure(traces)
+    f.update_yaxes(autorange="reversed", scaleanchor="x", scaleratio=1)
+    f.update_layout(height=height, title=title, margin=dict(l=10, r=10, t=40, b=10),
+                    template="plotly_white")
+    return f
 
 
 # ============================================================================ allocentric transform
@@ -309,6 +356,42 @@ def cluster_pipeline(X, pca_k=10, drop_pcs=(0, 2), n_neighbors=15, min_dist=0.0,
     emb = run_umap(res, n_neighbors, min_dist, 2, seed)
     labels = run_hdbscan(emb, min_cluster_size)
     return dict(emb=emb, labels=labels, scores=scores, evr=evr, Xz=Xz)
+
+
+def load_umap_sweep(root=None):
+    """Load the precomputed UMAP parameter sweep for notebook 03 (see tools/build_umap_sweep.py).
+    Lets the notebook show how n_neighbors/min_dist reshape the map *without* running UMAP live
+    (a ~30s numba JIT on a cold kernel that otherwise hangs the web app). Returns the npz dict."""
+    z = np.load(data_path("data/umap_sweep.npz", root), allow_pickle=True)
+    return {k: z[k] for k in z.files}
+
+
+def sweep_grid_fig(emb_grid, nn_values, md_values, color_key, palette, names, height=680):
+    """Small-multiples plot of a UMAP sweep: one panel per (n_neighbors, min_dist) cell, each
+    colored the same way, so the parameter effect is visible at a glance. color_key is a per-point
+    integer group id; palette/names map group id -> color/label."""
+    from plotly.subplots import make_subplots
+    import plotly.graph_objects as go
+    n_nn, n_md = len(nn_values), len(md_values)
+    titles = [f"n_neighbors={nn}, min_dist={md:g}" for nn in nn_values for md in md_values]
+    fig = make_subplots(rows=n_nn, cols=n_md, subplot_titles=titles,
+                        horizontal_spacing=0.04, vertical_spacing=0.08)
+    groups = [g for g in names if (color_key == g).any()]
+    for i in range(n_nn):
+        for j in range(n_md):
+            emb = emb_grid[i, j]
+            for g in groups:
+                m = color_key == g
+                fig.add_trace(go.Scattergl(
+                    x=emb[m, 0], y=emb[m, 1], mode="markers", name=names[g],
+                    marker=dict(size=3, opacity=0.6, color=palette[g]),
+                    legendgroup=names[g], showlegend=(i == 0 and j == 0)),
+                    row=i + 1, col=j + 1)
+    fig.update_xaxes(showticklabels=False).update_yaxes(showticklabels=False)
+    fig.update_layout(template="plotly_white", height=height,
+                      title="UMAP parameter sweep — same points, different knobs",
+                      margin=dict(l=10, r=10, t=60, b=10))
+    return fig
 
 
 # ============================================================================ rank / condition statistics
