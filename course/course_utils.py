@@ -39,6 +39,14 @@ DATA_FILES = [
     # Notebook 03: a precomputed UMAP parameter sweep + default embedding, so the map renders
     # instantly instead of blocking ~30s on numba JIT. Regenerate with tools/build_umap_sweep.py.
     "data/umap_sweep.npz",
+    # Precomputed metadata (cage/sex/tod) + features (X) + PCA, aligned to the event files, so no
+    # student kernel does >2s compute. tools/build_derived.py.
+    "data/train_derived.npz",
+    "data/heldout_derived.npz",
+    # One cage's continuous 24h span (2 fps) for NB07's activity clock + Markov grammar.
+    "data/continuous_tracks.npz",
+    # Synthetic population raster for NB08's neural payoff. tools/build_neural_demo.py.
+    "data/neural_demo.npz",
 ]
 
 
@@ -592,3 +600,324 @@ def eval_binary(y_true, y_score, thr=0.5):
         out["roc_auc"] = float(roc_auc_score(y_true, y_score))
         out["avg_precision"] = float(average_precision_score(y_true, y_score))
     return out
+
+
+# ============================================================================ derived-bundle loaders
+def load_derived(tag="train", root=None):
+    """Precomputed metadata + features + PCA aligned row-for-row with {tag}_events.npz
+    (tools/build_derived.py). Keys: cage, sex, tod_hour, X (N,19), pca_scores (N,10),
+    feature_names; the train file also has evr, pca_components, pca_mean, pca_std."""
+    z = np.load(data_path(f"data/{tag}_derived.npz", root), allow_pickle=True)
+    return {k: z[k] for k in z.files}
+
+
+def load_continuous_tracks(cam="15", root=None):
+    """One cage's continuous 24h span at 2 fps (tools/build_continuous_tracks.py). Returns dict:
+    centroids (T,3,2), speed (T,3) px/s, tod_hour (T,), state_seq (T,) int, state_names, fps, sex."""
+    z = np.load(data_path("data/continuous_tracks.npz", root), allow_pickle=True)
+    cam = str(cam)
+    sex = dict(zip(z["cams"].astype(str), z["sex"].astype(str)))
+    return dict(centroids=z[f"cam{cam}_cen"].astype(np.float32),
+                speed=z[f"cam{cam}_speed"].astype(np.float32),
+                tod_hour=z[f"cam{cam}_tod"].astype(np.float32),
+                state_seq=z[f"cam{cam}_state"].astype(int),
+                state_names=[str(s) for s in z["state_names"]],
+                fps=float(z["fps"]), sex=sex.get(cam, "?"), cam=cam)
+
+
+def load_neural_demo(root=None):
+    """Synthetic population raster for NB08 (tools/build_neural_demo.py). Keys: X_neural
+    (trials,neurons) counts, y (trials,) hidden state, is_tuned (neurons,), emb2d (trials,2)."""
+    z = np.load(data_path("data/neural_demo.npz", root), allow_pickle=True)
+    return {k: z[k] for k in z.files}
+
+
+# ============================================================================ pose QC
+def node_reliability(kp):
+    """Fraction of frames each of the 15 nodes is finite (tracked). kp (...,15,2) -> (15,)."""
+    kp = np.asarray(kp, float)
+    ok = np.isfinite(kp).all(axis=-1)                       # (...,15)
+    return ok.reshape(-1, kp.shape[-2]).mean(axis=0)
+
+
+def centroid_jumps(kp_event):
+    """Per-track body-centroid displacement between frames — big spikes flag identity swaps.
+    kp_event (T,3,15,2) -> (3, T-1) px/frame."""
+    cen = np.stack([_centroids(kp_event[:, m]) for m in range(kp_event.shape[1])], axis=0)  # (3,T,2)
+    return np.linalg.norm(np.diff(cen, axis=1), axis=2)     # (3,T-1)
+
+
+# ============================================================================ time-series tools (numpy-only)
+def wavelet_power(sig, freqs, fps, w0=6.0):
+    """Morlet continuous-wavelet POWER of a 1-D signal (pure numpy; no pywt). Convolve the signal
+    with a complex Morlet wavelet tuned to each frequency and take |.|^2.
+    Inputs:  sig (T,) real signal; freqs (F,) Hz; fps sampling rate.
+    Returns: (F, T) power — a spectrogram showing which rhythms are present when."""
+    sig = np.asarray(sig, float)
+    sig = np.nan_to_num(sig - np.nanmean(sig))
+    T = len(sig)
+    out = np.empty((len(freqs), T))
+    dt = 1.0 / fps
+    for i, f in enumerate(freqs):
+        s = w0 / (2 * np.pi * f) / dt                       # wavelet scale in samples
+        n = int(np.ceil(s * 6))
+        t = np.arange(-n, n + 1)
+        psi = np.exp(1j * w0 * t / s) * np.exp(-0.5 * (t / s) ** 2)
+        psi /= (np.sqrt(s) * np.pi ** 0.25)                 # energy normalization
+        out[i] = np.abs(np.convolve(sig, psi, mode="same")) ** 2
+    return out
+
+
+def cross_corr_lag(x, y, max_lag):
+    """Normalized cross-correlation of x,y over integer lags [-max_lag, max_lag].
+    Returns (lags, corr, peak_lag). peak_lag > 0 means x LEADS y (y follows x)."""
+    x = np.nan_to_num(np.asarray(x, float)); y = np.nan_to_num(np.asarray(y, float))
+    x = (x - x.mean()) / (x.std() + 1e-12); y = (y - y.mean()) / (y.std() + 1e-12)
+    n = len(x); lags = np.arange(-max_lag, max_lag + 1)
+    corr = np.empty(len(lags))
+    for i, k in enumerate(lags):
+        a, b = (x[:n - k], y[k:]) if k >= 0 else (x[-k:], y[:n + k])
+        corr[i] = np.mean(a * b) if len(a) > 1 else 0.0
+    peak = int(lags[np.argmax(corr)])
+    return lags, corr, peak
+
+
+def granger_pair(x, y, lags=5):
+    """Pairwise Granger causality via a numpy VAR F-test (no statsmodels). Does the PAST of one
+    series improve prediction of the other beyond its own past?
+    Returns {f_xy,p_xy,f_yx,p_yx}: 'xy' = x->y (x helps predict y). Small p => directed influence."""
+    from scipy.stats import f as fdist
+    x = np.nan_to_num(np.asarray(x, float)); y = np.nan_to_num(np.asarray(y, float))
+
+    def _test(target, source):
+        L = lags; Y = target[L:]; rows = len(Y)
+        own = np.column_stack([target[L - k - 1:len(target) - k - 1] for k in range(L)])
+        ext = np.column_stack([source[L - k - 1:len(source) - k - 1] for k in range(L)])
+        Xr = np.column_stack([np.ones(rows), own])
+        Xu = np.column_stack([np.ones(rows), own, ext])
+        rss = lambda X: float(np.sum((Y - X @ np.linalg.lstsq(X, Y, rcond=None)[0]) ** 2))
+        rss_r, rss_u = rss(Xr), rss(Xu)
+        df1, df2 = L, rows - Xu.shape[1]
+        F = ((rss_r - rss_u) / df1) / (rss_u / df2 + 1e-12)
+        return float(F), float(fdist.sf(F, df1, df2))
+    f_xy, p_xy = _test(y, x)
+    f_yx, p_yx = _test(x, y)
+    return dict(f_xy=f_xy, p_xy=p_xy, f_yx=f_yx, p_yx=p_yx)
+
+
+# ============================================================================ effect size / enrichment
+def cohens_d(X, y):
+    """Per-feature Cohen's d (standardized mean difference) between the two groups in binary y.
+    X (N,F), y (N,) -> (F,). |d|~0.2 small, 0.5 medium, 0.8 large."""
+    X = np.asarray(X, float); y = np.asarray(y).astype(bool)
+    a, b = X[y], X[~y]
+    pooled = np.sqrt(((len(a) - 1) * a.var(0, ddof=1) + (len(b) - 1) * b.var(0, ddof=1)) /
+                     (len(a) + len(b) - 2) + 1e-12)
+    return (a.mean(0) - b.mean(0)) / pooled
+
+
+def covariate_enrichment(in_group, covariate):
+    """Chi-square test: is a categorical `covariate` distributed differently INSIDE vs OUTSIDE the
+    boolean mask `in_group` (e.g. one cluster vs the rest)? EVENT-LEVEL — the naive test NB06 shows
+    can mislead under pseudoreplication. Returns {chi2,p,dof,levels,residuals}."""
+    from scipy.stats import chi2_contingency
+    g = np.asarray(in_group).astype(bool); cov = np.asarray(covariate)
+    levels = sorted(set(cov.tolist()))
+    inc = np.array([np.sum(cov[g] == L) for L in levels])
+    out = np.array([np.sum(cov[~g] == L) for L in levels])
+    table = np.vstack([inc, out]); keep = table.sum(0) > 0
+    chi2, p, dof, exp = chi2_contingency(table[:, keep])
+    resid = (table[0, keep] - exp[0]) / np.sqrt(exp[0])
+    return dict(chi2=float(chi2), p=float(p), dof=int(dof),
+                levels=[L for L, k in zip(levels, keep) if k], residuals=resid)
+
+
+def permutation_test(in_group, covariate, unit, n=5000, seed=0):
+    """Honest enrichment p-value that respects clustering by `unit` (e.g. cage). The covariate is
+    assumed constant within a unit (sex, cage). We permute the covariate label AT THE UNIT LEVEL,
+    preserving within-unit structure, and compare |mean(in)-mean(out)| to the null. Returns
+    {stat, p_emp}. This is NB06's antidote to pseudoreplication."""
+    rng = np.random.RandomState(seed)
+    g = np.asarray(in_group).astype(bool); unit = np.asarray(unit)
+    _, cov_num = np.unique(np.asarray(covariate), return_inverse=True)
+    stat = lambda c: abs(c[g].mean() - c[~g].mean())
+    obs = stat(cov_num.astype(float))
+    units = np.unique(unit)
+    vals = np.array([cov_num[unit == u][0] for u in units], float)
+    count = 0
+    for _ in range(n):
+        mapping = dict(zip(units, rng.permutation(vals)))
+        if stat(np.array([mapping[u] for u in unit], float)) >= obs - 1e-12:
+            count += 1
+    return dict(stat=float(obs), p_emp=(count + 1) / (n + 1))
+
+
+# ============================================================================ Markov / behavioral grammar
+def discretize_states(speed, centroids, s_move=None, d_close=None):
+    """Label each timepoint with a cage-level behavioral state from kinematics.
+    speed (T,3) px/s, centroids (T,3,2). Thresholds default to data percentiles (mean-speed 40th,
+    min-pair-distance 25th). Returns (state_seq (T,) int, state_names). 0 rest, 1 locomote, 2 huddle."""
+    speed = np.asarray(speed, float); cen = np.asarray(centroids, float)
+    mean_speed = np.nanmean(speed, axis=1)
+    dif = cen[:, :, None, :] - cen[:, None, :, :]
+    iu = np.triu_indices(cen.shape[1], k=1)
+    min_pair = np.nanmin(np.linalg.norm(dif, axis=3)[:, iu[0], iu[1]], axis=1)
+    if s_move is None:
+        s_move = np.nanpercentile(mean_speed, 40)
+    if d_close is None:
+        d_close = np.nanpercentile(min_pair, 25)
+    state = np.ones(len(mean_speed), int)
+    state[mean_speed < s_move] = 0
+    state[min_pair < d_close] = 2
+    return state, ["rest", "locomote", "huddle"]
+
+
+def transition_matrix(state_seq, n_states=None):
+    """Row-stochastic Markov transition matrix. Returns (K,K): T[i,j] = P(next=j | now=i)."""
+    s = np.asarray(state_seq, int)
+    K = n_states or int(s.max() + 1)
+    M = np.zeros((K, K))
+    np.add.at(M, (s[:-1], s[1:]), 1)
+    row = M.sum(1, keepdims=True)
+    return np.divide(M, row, out=np.zeros_like(M), where=row > 0)
+
+
+def stationary_dist(T, method="simulate", steps=50000, seed=0):
+    """Long-run fraction of time spent in each state. Default 'simulate' runs a random walk on T
+    (the intuitive definition — no eigen-decomposition). 'eig' returns the leading left eigenvector."""
+    T = np.asarray(T, float); K = T.shape[0]
+    if method == "eig":
+        w, v = np.linalg.eig(T.T)
+        pi = np.abs(np.real(v[:, np.argmin(np.abs(w - 1))]))
+        return pi / pi.sum()
+    rng = np.random.RandomState(seed)
+    s = 0; counts = np.zeros(K)
+    for _ in range(steps):
+        counts[s] += 1
+        s = rng.choice(K, p=T[s]) if T[s].sum() > 0 else rng.randint(K)
+    return counts / counts.sum()
+
+
+def transition_entropy(T):
+    """Average uncertainty of the next state (bits), weighted by the stationary distribution.
+    0 = perfectly predictable grammar; log2(K) = memoryless/uniform."""
+    T = np.asarray(T, float)
+    pi = stationary_dist(T, method="eig")
+    with np.errstate(divide="ignore", invalid="ignore"):
+        row_H = -np.nansum(np.where(T > 0, T * np.log2(T), 0.0), axis=1)
+    return float(np.sum(pi * row_H))
+
+
+def shuffle_transition_null(state_seq, n=1000, seed=0, stat="entropy"):
+    """Null distribution of a transition statistic when temporal ORDER is destroyed (shuffle the
+    sequence n times). Compare the real value to this to prove the grammar beats chance. stat =
+    'entropy' (transition_entropy) or 'self' (mean self-transition prob). Returns (n,)."""
+    rng = np.random.RandomState(seed)
+    s = np.asarray(state_seq, int); K = int(s.max() + 1)
+    out = np.empty(n)
+    for i in range(n):
+        M = transition_matrix(rng.permutation(s), K)
+        out[i] = transition_entropy(M) if stat == "entropy" else float(np.mean(np.diag(M)))
+    return out
+
+
+# ============================================================================ time-of-day / activity clock
+def time_of_day(event_key):
+    """Approximate time-of-day (hours in [0,24)) an event occurred, from its event_key. Reverse
+    cycle: lights ON 21:00-09:00, so the DARK/active phase is ~09:00-21:00."""
+    import re
+    _, stem, _, cf = str(event_key).split("|")
+    h = int(re.search(r"T(\d{2})", stem).group(1))
+    return (h + int(cf) / FPS / 3600.0) % 24.0
+
+
+def activity_by_tod(speed, tod_hour, bin_min=30, n_boot=200, seed=0):
+    """Circadian activity curve: mean movement speed binned by time-of-day, with a bootstrap 95% CI.
+    speed (T,3) or (T,); tod_hour (T,) in [0,24). Returns {centers, curve, ci_low, ci_high}."""
+    rng = np.random.RandomState(seed)
+    sp = np.asarray(speed, float)
+    a = np.nanmean(sp, axis=1) if sp.ndim == 2 else sp
+    tod = np.asarray(tod_hour, float)
+    edges = np.arange(0, 24 + 1e-9, bin_min / 60.0)
+    centers = (edges[:-1] + edges[1:]) / 2
+    curve = np.full(len(centers), np.nan); lo = np.full_like(curve, np.nan); hi = np.full_like(curve, np.nan)
+    which = np.clip(np.digitize(tod, edges) - 1, 0, len(centers) - 1)
+    for b in range(len(centers)):
+        vals = a[which == b]; vals = vals[np.isfinite(vals)]
+        if len(vals) < 2:
+            continue
+        curve[b] = vals.mean()
+        boot = [rng.choice(vals, len(vals), replace=True).mean() for _ in range(n_boot)]
+        lo[b], hi[b] = np.percentile(boot, [2.5, 97.5])
+    return dict(centers=centers, curve=curve, ci_low=lo, ci_high=hi)
+
+
+# ============================================================================ agreement / calibration / decoding
+def cohens_kappa(a, b):
+    """Cohen's kappa: inter-rater agreement corrected for chance agreement. a,b (N,) -> float
+    (1 perfect, 0 chance)."""
+    a = np.asarray(a); b = np.asarray(b)
+    labels = sorted(set(a.tolist()) | set(b.tolist()))
+    idx = {L: i for i, L in enumerate(labels)}; K = len(labels)
+    M = np.zeros((K, K))
+    for x, y in zip(a, b):
+        M[idx[x], idx[y]] += 1
+    N = M.sum(); po = np.trace(M) / N
+    pe = np.sum(M.sum(0) * M.sum(1)) / N ** 2
+    return float((po - pe) / (1 - pe + 1e-12))
+
+
+def calibration_curve(y, scores, n_bins=10):
+    """Reliability curve: bin predicted probabilities, return (frac_positive, mean_pred) per
+    non-empty bin. A calibrated classifier lies on the diagonal."""
+    y = np.asarray(y).astype(float); scores = np.asarray(scores, float)
+    edges = np.linspace(0, 1, n_bins + 1)
+    which = np.clip(np.digitize(scores, edges) - 1, 0, n_bins - 1)
+    frac, mean = [], []
+    for b in range(n_bins):
+        m = which == b
+        if m.any():
+            frac.append(float(y[m].mean())); mean.append(float(scores[m].mean()))
+    return np.array(frac), np.array(mean)
+
+
+def synthetic_population_raster(n_neurons=60, n_trials=800, n_tuned=18, seed=7):
+    """Toy neural population: spike counts (trials,neurons) driven by a hidden binary state y.
+    Mirrors tools/build_neural_demo.py so students can regenerate/vary it. Returns (X, y, is_tuned)."""
+    rng = np.random.RandomState(seed)
+    y = rng.randint(0, 2, n_trials)
+    base = rng.uniform(1.0, 4.0, n_neurons)
+    tuned = np.zeros(n_neurons, int); tuned[rng.choice(n_neurons, n_tuned, replace=False)] = 1
+    sign = rng.choice([-1, 1], n_neurons)
+    gain = 1.0 + tuned * sign * rng.uniform(0.4, 1.2, n_neurons)
+    rates = base[None, :] * np.where(y[:, None] == 1, gain[None, :], 1.0)
+    return rng.poisson(np.clip(rates, 0.05, None)).astype(int), y, tuned
+
+
+def pca_loadings_fig(components, feature_names, k=3):
+    """Heatmap of the first k PC loadings across features — shows what each component 'means'."""
+    import plotly.graph_objects as go
+    C = np.asarray(components)[:k]
+    fig = go.Figure(go.Heatmap(z=C, x=list(feature_names), y=[f"PC{i}" for i in range(k)],
+                               colorscale="RdBu", zmid=0))
+    fig.update_layout(template="plotly_white", height=110 + 55 * k,
+                      title="PCA loadings — how features combine into components",
+                      margin=dict(l=10, r=10, t=40, b=130))
+    return fig
+
+
+def roc_pr_fig(y, scores):
+    """Side-by-side ROC and precision-recall curves for a binary decoder."""
+    from plotly.subplots import make_subplots
+    from sklearn.metrics import (roc_curve, precision_recall_curve, roc_auc_score,
+                                 average_precision_score)
+    y = np.asarray(y).astype(int)
+    fpr, tpr, _ = roc_curve(y, scores); prec, rec, _ = precision_recall_curve(y, scores)
+    fig = make_subplots(rows=1, cols=2, subplot_titles=(
+        f"ROC (AUC={roc_auc_score(y, scores):.3f})", f"PR (AP={average_precision_score(y, scores):.3f})"))
+    fig.add_scatter(x=fpr, y=tpr, mode="lines", row=1, col=1, line=dict(color="#4c78a8"), showlegend=False)
+    fig.add_scatter(x=[0, 1], y=[0, 1], mode="lines", row=1, col=1, line=dict(dash="dot", color="#bbb"),
+                    showlegend=False)
+    fig.add_scatter(x=rec, y=prec, mode="lines", row=1, col=2, line=dict(color="#e45756"), showlegend=False)
+    fig.update_layout(template="plotly_white", height=360, margin=dict(l=10, r=10, t=40, b=10))
+    return fig

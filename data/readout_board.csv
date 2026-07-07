@@ -1,0 +1,9 @@
+gauge,notebook,stage,value,unit,note
+A,NB01,raw pose per event,11700.0,numbers,130 frames x 3 mice x 15 nodes x 2
+A,NB02,allocentric features,19.0,numbers,interpretable body-frame features
+A,NB04,principal components,6.0,dims,71% of variance kept
+A,NB05,behavioral map,2.0,dims,UMAP coordinates -> syllables
+A,NB05,one syllable,1.0,label,a single behavioral category
+B,NB05,best aggression cluster lift,1.4,x,honest enrichment of the top cluster vs base rate
+B,NB06,features -> aggression (train CV),0.837,AUROC,"logistic, 5-fold"
+B,NB08,held-out cage decode,0.86,AUROC,"MLP trained on 7 cages, tested on Cage 16 (unseen)"
