@@ -68,9 +68,10 @@ Each notebook must still export cleanly headless.
 - **Delete the "Hero Event" branding everywhere.** Refer to the running example plainly as **"our
   example interaction"** or **"the example approach event."**
 - Label the two interacting mice as **approacher** and **approachee** (or **subject** / **partner**).
-- Keep the **same example event index as before** (`HERO = 909`, Cage 15, male aggression approach —
-  approacher = Dom, approachee = Sub, bystander = Mid). Just stop calling it a Hero. You may keep the
-  variable name in code if it is load-bearing, but never surface the word "Hero" in prose or titles.
+- Select the running example by its **stable `event_key`** via `cu.event_index_by_key(ev, KEY)` —
+  NEVER a raw integer index. The bundle is periodically rebuilt (adding a cohort changed N 1500→2499
+  and re-ordered rows), so an integer index silently drifts to a different event; a key is stable.
+  Whatever the current example is, describe it from the data, and never surface the word "Hero".
 
 ---
 

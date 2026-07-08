@@ -132,7 +132,7 @@ def _(cu, der, ev):
     # Its registry category is "mlp_fp": an ambiguous near-miss that an earlier model flagged as
     # aggression but a human scored as NOT aggression (ground-truth agg_label = 0). That ambiguity is
     # useful later, when we watch the decoder score it near its decision boundary.
-    ex_idx = 909
+    ex_idx = cu.event_index_by_key(ev, "12192025_pre|cam.10.00046-2025-12-18T16|m0-m2|83141")
     ex_cage = int(der["cage"][ex_idx])
     ex_sex = str(der["sex"][ex_idx])
     ex_tod = float(cu.time_of_day(str(ev["event_key"][ex_idx])))
@@ -143,12 +143,12 @@ def _(cu, der, ev):
 
 
 @app.cell(hide_code=True)
-def _(ex_cage, ex_gif, ex_sex, ex_tod, mo):
+def _(ex_cage, ex_gif, ex_idx, ex_sex, ex_tod, mo):
     mo.md(
         f"""
         ### Our example interaction
 
-        We keep the same example event we have followed all week (event **#909**, cage
+        We keep the same example event we have followed all week (event **#{ex_idx}**, cage
         **{ex_cage}**, **{"female" if ex_sex == "F" else "male"}** cage). The two interacting mice are
         the **approacher** and the **approachee**; a third mouse is a **bystander**. Skeletons are
         colored **only by social rank** (<span style="color:#d62728">Dom = red</span>,

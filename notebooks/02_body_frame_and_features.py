@@ -137,11 +137,12 @@ def _(ROOT, cu, np):
     sex = der["sex"].astype(str)              # (N,) 'M' | 'F' (one sex per cage)
     feat_names = [str(f) for f in cu.FEATURE_NAMES]
 
-    # Our running example: event 909 is cleanly tracked on every frame (all 15 nodes present the whole
-    # window), which makes the coordinate transform easy to see. It is a Sub-approaches-Mid approach
+    # Our running example (pinned by stable event_key, not a raw integer index, so it survives bundle
+    # rebuilds) is cleanly tracked on every frame (all 15 nodes present the whole window), which makes
+    # the coordinate transform easy to see. It is a Sub-approaches-Mid approach
     # with a Dom bystander, from a female cage; it happens to be a NON-aggression approach — we use it
     # for the geometry, and pull separate aggression clips later.
-    EX = 909
+    EX = cu.event_index_by_key(ev, "12192025_pre|cam.10.00046-2025-12-18T16|m0-m2|83141")
     ex_hex = tuple(cu.RANK_HEX.get(int(r), cu.RANK_HEX[0]) for r in ranks[EX])
     return (EX, X, agg, cage, cohort, condition, contact, ev, ex_hex,
             feat_names, kp, ranks, sex)
@@ -671,10 +672,24 @@ def _(mo):
 
 @app.cell
 def _(cu, ev, mo):
-    # SHOW the difference before measuring it: two grids of exemplar clips (indices pinned in the prep
-    # contract; all reliably tracked so they render cleanly).
-    _agg_idx = [969, 560, 900, 53]
-    _non_idx = [161, 341, 376, 345]
+    # SHOW the difference before measuring it: two grids of exemplar clips. We pin each clip by its
+    # stable event_key (never a raw integer index, which a bundle rebuild would silently re-point at a
+    # different event) and resolve it to its current row; all are reliably tracked so they render
+    # cleanly.
+    _agg_keys = [
+        "12192025_pre|cam.11.00046-2025-12-18T16|m1-m2|18193",
+        "12192025_post|cam.10.00145-2025-12-23T18|m0-m2|88003",
+        "12192025_pre|cam.10.00036-2025-12-18T16|m0-m1|3323",
+        "12192025_dep|cam.10.00052-2025-12-19T16|m1-m2|10408",
+    ]
+    _non_keys = [
+        "12192025_dep|cam.11.00191-2025-12-19T16|m1-m2|33859",
+        "12192025_dep|cam.14.00140-2025-12-19T16|m1-m2|76967",
+        "12192025_dep|cam.15.00001-2025-12-19T16|m0-m1|55075",
+        "12192025_dep|cam.14.00144-2025-12-19T16|m0-m1|52961",
+    ]
+    _agg_idx = [cu.event_index_by_key(ev, _k) for _k in _agg_keys]
+    _non_idx = [cu.event_index_by_key(ev, _k) for _k in _non_keys]
     _agg_grid = cu.grid_gif_bytes(
         [(ev["kp"][j], ev["ranks"][j], int(ev["contact_rel"][j])) for j in _agg_idx],
         ncols=4, cell=150, fps=20)
@@ -682,9 +697,9 @@ def _(cu, ev, mo):
         [(ev["kp"][j], ev["ranks"][j], int(ev["contact_rel"][j])) for j in _non_idx],
         ncols=4, cell=150, fps=20)
     mo.vstack([
-        mo.md("**Aggression** (events 969, 560, 900, 53)"),
+        mo.md("**Aggression** — four clean exemplar clips"),
         mo.Html(cu.gif_img_html(_agg_grid, width=620)),
-        mo.md("**Not aggression** (events 161, 341, 376, 345)"),
+        mo.md("**Not aggression** — four clean exemplar clips"),
         mo.Html(cu.gif_img_html(_non_grid, width=620)),
     ])
     return

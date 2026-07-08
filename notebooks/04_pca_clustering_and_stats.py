@@ -97,7 +97,7 @@ def _(ROOT, cu, np):
 
     N    = int(len(X))                                                     # 2499 training events
     n_ho = int(len(hod["cage"]))                                           # 780 held-out events
-    EXAMPLE = 909            # our running example event (cage 110, condition 'pre', NON-aggression)
+    EXAMPLE = cu.event_index_by_key(ev, "12192025_pre|cam.10.00046-2025-12-18T16|m0-m2|83141")  # running example (cage 110, 'pre', NON-aggression)
 
     # canonical cluster palette (c3 = aggression-enriched -> red); pinned per-cluster exemplar indices
     CPAL = {-1: "#d5d5d5", 0: "#8c9196", 1: "#f2b134", 2: "#4c78a8", 3: "#e45756"}
@@ -723,7 +723,7 @@ def _(mo):
 
         Pick any cell. The map redraws instantly from the precomputed grid, now colored by the
         **canonical syllables** (`sweep["default_labels"]`) that the rest of the analysis uses. The gold
-        star marks our example event (#909). The default cell (`n_neighbors=15, min_dist=0.0`) is the
+        star marks our running example event. The default cell (`n_neighbors=15, min_dist=0.0`) is the
         one everything is pinned to.
         """
     )
@@ -751,7 +751,7 @@ def _(CPAL, EXAMPLE, clabels, go, md_pick, mo, nn_pick, sweep):
         _nm = "noise" if _c < 0 else f"C{_c}"
         _fig.add_scattergl(x=_emb[_m, 0], y=_emb[_m, 1], mode="markers", name=_nm,
                            marker=dict(size=5, opacity=0.7, color=CPAL[_c]))
-    _fig.add_scatter(x=[_emb[EXAMPLE, 0]], y=[_emb[EXAMPLE, 1]], mode="markers", name="example #909",
+    _fig.add_scatter(x=[_emb[EXAMPLE, 0]], y=[_emb[EXAMPLE, 1]], mode="markers", name=f"example #{EXAMPLE}",
                      marker=dict(symbol="star", size=17, color="#f5b400",
                                  line=dict(color="#333", width=1)))
     _fig.update_layout(template="plotly_white", height=520,
@@ -772,7 +772,7 @@ def _(mo):
         Every dot is **one entire interaction event** — reduced from a skeleton, to 19 features, to a
         few PC scores, to one (x, y) location. When two dots sit close, the two events had similar
         posture and motion. Before we cluster, look at a real event so the dots feel concrete. Our
-        running example, #909, is a **non-aggression** close approach in cage 110 (an event the earlier
+        running example is a **non-aggression** close approach in cage 110 (an event the earlier
         automatic detector had wrongly flagged, which is why we keep it as an honest "near miss"): the
         <span style="color:#2ca02c">Sub mouse (green)</span> approaches the
         <span style="color:#1f77b4">Mid mouse (blue)</span>, with the
@@ -786,8 +786,8 @@ def _(mo):
 def _(EXAMPLE, cu, ev, mo):
     _gif = cu.event_gif_bytes(ev["kp"][EXAMPLE], ev["ranks"][EXAMPLE],
                               int(ev["contact_rel"][EXAMPLE]), cell=240)
-    mo.md("<b>Example event #909</b> — a calm, non-aggressive approach. Mice colored by rank; the "
-          "white arrow points approacher -> approachee; the red dot marks contact.<br>"
+    mo.md(f"<b>Example event #{EXAMPLE}</b> — a calm, non-aggressive approach. Mice colored by rank; "
+          "the white arrow points approacher -> approachee; the red dot marks contact.<br>"
           + cu.gif_img_html(_gif, width=260))
     return
 

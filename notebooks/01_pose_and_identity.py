@@ -61,11 +61,11 @@ def _(cu, np):
 
     # --- our example approach event: one real event we return to throughout the notebook ---
     # The three mice are stored in fixed slots, ordered [approacher, approachee, bystander].
-    # In event 909 the approacher is the Sub mouse (green), the approachee is the Mid mouse (blue),
+    # In this event the approacher is the Sub mouse (green), the approachee is the Mid mouse (blue),
     # and the bystander is the Dom mouse (red). It is a NON-aggressive approach (agg_label = 0), from a
     # female cage (cohort 12192025, cohort-unique cage 110). We chose it because every keypoint is
     # tracked cleanly, which makes it a good object to learn the data structure on.
-    EX_IDX = 909
+    EX_IDX = cu.event_index_by_key(ev, "12192025_pre|cam.10.00046-2025-12-18T16|m0-m2|83141")
     ex_kp = ev["kp"][EX_IDX]                          # (130, 3, 15, 2) pose over time
     ex_ranks = ev["ranks"][EX_IDX]                    # (3,) rank of each ordered mouse -> [3, 2, 1]
     ex_cr = int(ev["contact_rel"][EX_IDX])            # frame at which contact begins
@@ -194,7 +194,7 @@ def _(ev, ex_kp, mo):
         **`{tuple(ev["kp"].shape)}`** — that is **{_N} events**, each **{_T} frames** long, with
         **{_M} mice**, **{_Nn} keypoints** per mouse, and **{_xy} numbers (x, y)** per keypoint.
 
-        One event, `ex_kp = ev["kp"][909]`, has shape **`{tuple(ex_kp.shape)}`**. To pull out a single
+        One event, `ex_kp = ev["kp"][EX_IDX]`, has shape **`{tuple(ex_kp.shape)}`**. To pull out a single
         mouse's single keypoint over the whole event, we index the two middle axes and keep `:` (which
         means "everything") on the first axis (time) and the last axis (x, y). For example the
         approacher's nose track is `ex_kp[:, 0, cu.NOSE, :]`, an array of shape

@@ -126,6 +126,54 @@ def load_events(npz_path):
     return d
 
 
+def event_index_by_key(events, key):
+    """Row index of the event whose stable ``event_key`` == ``key``.
+
+    ALWAYS select example events this way, never by a raw integer index: the bundle is periodically
+    rebuilt (e.g. to add a cohort), which changes N and RE-ORDERS the rows, so a hardcoded index like
+    909 silently points at a different event afterwards. An event_key is stable across rebuilds.
+
+    ``events`` is the dict returned by ``load_events`` (uses its ``event_key`` array); an array/list
+    of keys is also accepted. Raises KeyError if the key is absent, ValueError if it is duplicated."""
+    keys = events["event_key"] if isinstance(events, dict) else events
+    keys = np.asarray(keys).astype(str)
+    hits = np.where(keys == str(key))[0]
+    if len(hits) == 0:
+        raise KeyError(
+            f"event_key {key!r} not found in this bundle ({len(keys)} events). It may live in the "
+            f"other split (train vs heldout) or predate the current build.")
+    if len(hits) > 1:
+        raise ValueError(f"event_key {key!r} is not unique ({len(hits)} matches at {hits.tolist()}).")
+    return int(hits[0])
+
+
+def find_example_index(events, derived=None, category=None, cage=None, sex=None, cohort=None,
+                       tag="train"):
+    """Deterministic FIRST event matching the given criteria — a robust way to pick an illustrative
+    example by its PROPERTIES instead of a fragile integer index. Returns the lowest matching row
+    index, or -1 if nothing matches.
+
+    ``category`` is tested against ``events['category']`` (e.g. 'aggression', 'mounting', 'mlp_fp').
+    ``cage`` / ``sex`` / ``cohort`` come from the derived bundle: pass ``derived`` (from
+    ``load_derived``) or leave it None to load ``load_derived(tag)`` (defaults to the train split,
+    which must be the same split as ``events``). All given criteria are AND-combined."""
+    keys = np.asarray(events["event_key"]).astype(str)
+    mask = np.ones(len(keys), bool)
+    if category is not None:
+        mask &= np.asarray(events["category"]).astype(str) == str(category)
+    if any(v is not None for v in (cage, sex, cohort)):
+        if derived is None:
+            derived = load_derived(tag)
+        if cage is not None:
+            mask &= derived["cage"].astype(int) == int(cage)
+        if sex is not None:
+            mask &= derived["sex"].astype(str) == str(sex)
+        if cohort is not None:
+            mask &= derived["cohort"].astype(str) == str(cohort)
+    hits = np.where(mask)[0]
+    return int(hits[0]) if len(hits) else -1
+
+
 def load_slp_demo(root=None):
     """Load the pre-decoded example SLEAP clip for notebook 01 (no sleap-io needed).
 

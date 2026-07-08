@@ -220,9 +220,9 @@ def _(cu, np):
 
 
 @app.cell
-def _():
+def _(cu, ev):
     # Pinned build-time constants (verified against the committed 2-cohort bundle).
-    EXAMPLE = 909              # example event: cage 110 (cohort B), female, NON-aggression, contact @40
+    EXAMPLE = cu.event_index_by_key(ev, "12192025_pre|cam.10.00046-2025-12-18T16|m0-m2|83141")  # example event: cage 110 (cohort B), female, NON-aggression, contact @40
     CLEAN_AGG = [969, 560, 900, 53]        # clean, well-tracked aggression approaches
     CLEAN_NON = [161, 341, 376, 345]       # clean, well-tracked non-aggression approaches
     DOM_FREQ = 1.0             # example-event dominant speed rhythm (Hz), low edge of 1-12 Hz band
