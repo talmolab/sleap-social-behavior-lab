@@ -76,7 +76,7 @@ and the bundled data from this repo on first run), so there is nothing to upload
 For each lesson: open <https://molab.marimo.io>, create a notebook **from a GitHub URL**, and
 paste the lesson's URL (use the raw URL if molab asks for the file directly):
 
-- 01 — `https://github.com/Elmaestrotango/sleap-social-behavior-lab/blob/main/notebooks/01_pose_and_identity.py`
+- 01 — `https://github.com/talmolab/sleap-social-behavior-lab/blob/main/notebooks/01_pose_and_identity.py`
 - 02 — `.../notebooks/02_body_frame_and_features.py`
 - 03 — `.../notebooks/03_exploring_behavior_in_time.py`
 - 04 — `.../notebooks/04_pca_clustering_and_stats.py`

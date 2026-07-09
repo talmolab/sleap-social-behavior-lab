@@ -26,7 +26,7 @@ import numpy as np
 # public GitHub repo's raw endpoint. Override the source with $COURSE_REPO_RAW.
 REPO_RAW = os.environ.get(
     "COURSE_REPO_RAW",
-    "https://raw.githubusercontent.com/Elmaestrotango/sleap-social-behavior-lab/main",
+    "https://raw.githubusercontent.com/talmolab/sleap-social-behavior-lab/main",
 )
 DATA_FILES = [
     "data/train_events.npz",

@@ -33,7 +33,7 @@ def _():
     import numpy as np
     import plotly.graph_objects as go
     _RAW = os.environ.get("COURSE_REPO_RAW",
-        "https://raw.githubusercontent.com/Elmaestrotango/sleap-social-behavior-lab/main")
+        "https://raw.githubusercontent.com/talmolab/sleap-social-behavior-lab/main")
     def _find_root():
         p = os.getcwd()
         for _ in range(6):
