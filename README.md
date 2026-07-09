@@ -71,8 +71,8 @@ them, so a static WASM site would break at the clustering notebook.
 
 - **One link for the whole course (recommended).** `serve.py` publishes a landing page plus all
   ten lessons in order under a single URL, each with its own isolated kernel per visitor. Try it
-  with `uv run python serve.py` (→ <http://localhost:7860>), then host it free on a Hugging Face
-  Docker Space or self-host behind a tunnel. See [`DEPLOY.md`](DEPLOY.md).
+  with `uv run python serve.py` (→ <http://localhost:7860>), then self-host behind a tunnel. See
+  [`DEPLOY.md`](DEPLOY.md).
 - **One notebook at a time (molab).** [molab](https://molab.marimo.io) runs a single notebook on
   a free cloud kernel (the **Run** links in the lesson table above point straight to each one).
   Each notebook declares its dependencies inline (a PEP&nbsp;723 `# /// script` block pinned to

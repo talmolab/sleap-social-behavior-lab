@@ -11,8 +11,8 @@ Run locally:
 Or with uvicorn directly (same thing):
     uv run uvicorn serve:app --host 0.0.0.0 --port 7860
 
-Deploy on anything that runs an ASGI app — a Hugging Face Docker Space, or a lab
-VM / workstation behind a Cloudflare Tunnel or Tailscale. See DEPLOY.md.
+Deploy on anything that runs an ASGI app — a lab VM / workstation behind a
+Cloudflare Tunnel or Tailscale. See DEPLOY.md.
 """
 import os
 

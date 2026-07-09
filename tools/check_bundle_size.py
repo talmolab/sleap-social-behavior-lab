@@ -1,5 +1,5 @@
-"""Fail the build if the committed data bundle exceeds the size budget (students download it, and
-Hugging Face needs Git LFS above 10 MB/file). Per the course design: total <= 60 MB.
+"""Fail the build if the committed data bundle exceeds the size budget (students download it on
+first run). Per the course design: total <= 60 MB.
 
   uv run python tools/check_bundle_size.py
 """

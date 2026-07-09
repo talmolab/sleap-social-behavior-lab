@@ -22,32 +22,7 @@ labeling click-grid) work and re-run reactively, but the source code is read-onl
 for a class — nobody can corrupt a lesson, and sessions are isolated. If you want students to
 *edit code*, have them run locally (`uv run marimo edit notebooks/01_pose_and_identity.py`) or use molab.
 
-## Option A — Hugging Face Space (free, HF hosts it)
-
-1. Create a new **Docker** Space at <https://huggingface.co/new-space> (SDK: Docker).
-2. Push this repo to the Space's git remote (or point the Space at it). The included `Dockerfile`
-   builds the environment and runs `serve.py` on port 7860 (HF's default).
-3. Add this frontmatter to the top of the **Space's** `README.md` (only needed there):
-
-   ```
-   ---
-   title: SLEAP Social Behavior Lab
-   emoji: 🐭
-   colorFrom: green
-   colorTo: blue
-   sdk: docker
-   app_port: 7860
-   ---
-   ```
-
-4. Wait for the build (it installs numba/umap/hdbscan — a few minutes the first time), then share
-   the Space URL: `https://<user>-<space>.hf.space/`.
-
-Notes: the free CPU tier is one shared 2-vCPU / 16 GB container (kernels are isolated but share
-CPU) and sleeps after inactivity — open it once to wake it before class, or upgrade the hardware
-for a large cohort.
-
-## Option B — Self-host + tunnel (your box, one HTTPS link)
+## Option A — Self-host + tunnel (your box, one HTTPS link)
 
 Run it on a lab machine / VM and expose a single URL:
 
@@ -66,7 +41,7 @@ tailscale funnel 7860
 Share the printed HTTPS URL. More CPU/RAM and no idle-sleep, but you keep the process running
 (under `tmux` / `systemd`) for the duration of the course.
 
-## Option C — molab, one link per lesson (zero setup, no account push)
+## Option B — molab, one link per lesson (zero setup, no account push)
 
 [molab](https://molab.marimo.io) is marimo's own free cloud. There's no build and nothing to
 host — but each molab notebook is a single file, so this gives students **one link per lesson**
