@@ -3,7 +3,7 @@
 `serve.py` publishes the whole course — a landing page plus all ten lessons in order — from a
 **single URL**, using marimo's ASGI app server. It runs a **real Python kernel** (not
 WebAssembly), so `numba` / `umap-learn` / `hdbscan` work — unlike a GitHub-Pages / WASM export,
-which has no in-browser build for those and would break at the map lesson (05).
+which has no in-browser build for those and would break at the clustering/map lesson (04).
 
 Each visitor gets their own **isolated kernel session**; they share the machine's CPU/RAM.
 
@@ -13,7 +13,7 @@ Each visitor gets their own **isolated kernel session**; they share the machine'
 uv run python serve.py        # -> http://localhost:7860
 ```
 
-Open the URL and click through lessons 1–8.
+Open the URL and click through lessons 1–10.
 
 ## What students see
 
