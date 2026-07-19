@@ -29,19 +29,17 @@ def _(mo):
         | 1 | [Pose & Identity](/01) | Read the pose tensor `(frames, mice, nodes, xy)`; why one identity error corrupts everything downstream |
         | 2 | [The Body-Centered View](/02) | Center + rotate into a body frame; the 19 social features and why behavior is rotationally invariant |
         | 3 | [Behavior in Time](/03) | Distributions, wavelet rhythm, and who-leads-whom coordination |
-        | 4 | [PCA, Clustering & Statistics](/04) | The behavioral manifold and a UMAP map of syllables — and does sex or food deprivation really change behavior? |
-        | 5 | [Dynamics & Decoding](/05) | The transition grammar in time, then a decoder tested across cohorts |
+        | 4 | [Collapsing to a Manifold](/04) | PCA, the UMAP objective, and a clustered map of behavioral syllables |
+        | 5 | [How Analyses Mislead](/05) | The statistics that keep you honest: pseudoreplication, multiple comparisons, circular analysis, and CV leakage |
+        | 6 | [Dynamics & Decoding](/06) | The transition grammar in time, then a decoder tested across cohorts |
 
-        **Week 2 — From behavior to the brain.** The same computational moves, now on neural
-        recordings: calcium imaging, source separation, spatial tuning, and neural decoding.
+        **Week 2 — From behavior to the brain.** The same computational moves — matrix factorization,
+        manifolds, decoding — now on miniscope and two-photon neural recordings.
 
         | # | Lesson | What you build |
         |---|--------|----------------|
-        | 6 | [Motion Correction](/06) | Register a drifting miniscope movie so the signal stops moving |
-        | 7 | [Extracting a Calcium Trace](/07) | Background-subtract + ROI → one cell's calcium trace |
-        | 8 | [Separating the Neurons](/08) | CNMF footprints + traces from an optical mixture |
-        | 9 | [Place & Grid Cells](/09) | Occupancy-normalized rate maps + spatial information, shuffle-tested |
-        | 10 | [Decoding Social State](/10) | Social-contact ethograms, then a population decoder reads social state off calcium |
+        | 7 | [From Movie to Traces](/07) | Motion-correct a miniscope movie, then demix it into per-neuron footprints and calcium traces (CNMF) |
+        | 8 | [Reading the Population](/08) | Spatial tuning, a firing sequence, and a population decoder that reads social state off the neurons |
 
         ---
         Mice are colored by dominance **rank**: 🔴 Dom &nbsp;&nbsp; 🔵 Mid &nbsp;&nbsp; 🟢 Sub.

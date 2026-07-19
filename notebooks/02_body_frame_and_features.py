@@ -64,8 +64,8 @@ def _(mo):
         track reliably and which drop out.
 
         Those coordinates describe **where each mouse is in the arena** and **which way it faces in the
-        cage**. That is a problem, because an arena position is not a behavior. This notebook asks the
-        next question in the chain:
+        cage**. An arena position is not, by itself, a behavior. This notebook asks the next question in
+        the chain:
 
         > **How do we describe an interaction independent of where in the arena it happens and which way
         > the animals happen to be facing?**
@@ -74,15 +74,14 @@ def _(mo):
 
         We study social behavior and its neural basis; neither is treated as primary — the behavior and
         the circuits that produce it are two views of one system. A behavior — an attack, a sniff, a
-        chase — is the *same behavior*
-        whether it happens in the top-left corner of the cage or the bottom-right, and whether the two
-        mice face north or south. Raw pixel coordinates do not capture that: the identical behavior in
-        two locations produces completely different numbers, because the numbers describe *where in the
-        arena* the mice are, not *what they are doing to each other*.
+        chase — is the *same behavior* whether it happens in the top-left corner of the cage or the
+        bottom-right, and whether the two mice face north or south. Raw pixel coordinates do not capture
+        that: the identical behavior in two locations produces completely different numbers, because the
+        numbers describe *where in the arena* the mice are, not *what they are doing to each other*.
 
-        The animal does not care about the arena's orientation. The social geometry that matters — who
-        is in front of whom, how fast the gap is closing, who turns to face whom — is defined **relative
-        to the animals themselves**, not relative to the cage walls. Behavior is, in this precise sense,
+        The animal does not care about the arena's orientation. The social geometry that matters — who is
+        in front of whom, how fast the gap is closing, who turns to face whom — is defined **relative to
+        the animals themselves**, not relative to the cage walls. Behavior is, in this precise sense,
         **rotationally invariant**. So before we can compare events, describe them, or later train a
         classifier, we remove two things that are not part of the behavior: **where in the cage** the
         event happened, and **which way the animals were pointing in the arena**. What is left is the
@@ -108,6 +107,9 @@ def _(mo):
            mouse faces +y. This is the body-centered (egocentric) transform, `cu.allocentricize`.
         3. Summarize the transformed event into **19 interpretable numbers** — speeds, distances, and
            facing angles — that are the same no matter where or which way the event happened.
+        4. Prove the invariance directly, then ask a first scientific question of the 19 numbers: **which
+           of them distinguish aggression?** — and use that question to practice reading an *effect size*
+           against a *p-value*, a distinction we will lean on for the rest of the course.
 
         **Deliverable of this notebook:** the feature matrix `X (2499, 19)` — one 19-number vector per
         event. Every later notebook reads `X`, not pixels.
@@ -139,12 +141,21 @@ def _(ROOT, cu, np):
 
     # Our running example (pinned by stable event_key, not a raw integer index, so it survives bundle
     # rebuilds) is cleanly tracked on every frame (all 15 nodes present the whole window), which makes
-    # the coordinate transform easy to see. It is a Sub-approaches-Mid approach
-    # with a Dom bystander, from a female cage; it happens to be a NON-aggression approach — we use it
-    # for the geometry, and pull separate aggression clips later.
+    # the coordinate transform easy to see. It is a Sub-approaches-Mid approach with a Dom bystander,
+    # from a female cage; it happens to be a NON-aggression approach — we use it for the geometry, and
+    # pull separate aggression clips later.
     EX = cu.event_index_by_key(ev, "12192025_pre|cam.10.00046-2025-12-18T16|m0-m2|83141")
     ex_hex = tuple(cu.RANK_HEX.get(int(r), cu.RANK_HEX[0]) for r in ranks[EX])
-    return (EX, X, agg, cage, cohort, condition, contact, ev, ex_hex,
+
+    # The transform reads the approacher's heading from ONE anchor frame: the first frame on which its
+    # head AND tail-base are both tracked. That frame is the ONLY one where the approacher lands exactly
+    # on the origin facing up — a fact we make honest use of below. Compute it once here.
+    _focal = kp[EX].astype(float)[:, 0]                              # (T, 15, 2) the approacher
+    _head_ok = np.isfinite(_focal[:, cu.HEAD, :]).all(1)
+    _tti_ok = np.isfinite(_focal[:, cu.TTI, :]).all(1)
+    _valid = np.where(_head_ok & _tti_ok)[0]
+    ANCHOR = int(_valid[0]) if len(_valid) else 0
+    return (ANCHOR, EX, X, agg, cage, cohort, condition, contact, ev, ex_hex,
             feat_names, kp, ranks, sex)
 
 
@@ -161,7 +172,7 @@ def _(mo):
         (food-deprived), and **post**. Cage identity is **cohort-unique**: a cage number never means the
         same cage in two cohorts, so grouping by cage never accidentally mixes cohorts. Each cage holds
         animals of a single sex, so cage is also the natural **unit** for any sex comparison — a point
-        that becomes important when we do statistics in NB04.
+        that becomes important when we do statistics in NB05.
 
         The counts below are computed live from the loaded arrays.
         """
@@ -194,7 +205,7 @@ def _(agg, cage, cohort, condition, mo, sex):
         | female cages | {", ".join(str(c) for c in _females)} |
 
         One more cage — **Camera 16** (780 events, a single cohort, all female, base rate 0.385) — is
-        held out and never inspected here. We set it aside now and only touch it in **NB05**, where it
+        held out and never inspected here. We set it aside now and only touch it in **NB06**, where it
         measures how well a decoder generalizes to animals it has never seen. Keeping it untouched is
         what makes that later number trustworthy.
         """
@@ -225,7 +236,7 @@ def _(EX, cage, cohort, contact, cu, kp, mo, ranks):
         mo.md(
             f"""
             <div style="text-align:center;color:#555">
-            <b>Example event {EX}</b> — cohort {cohort[EX]}, cage {int(cage[EX])}
+            <b>Our example event</b> — cohort {cohort[EX]}, cage {int(cage[EX])}
             &nbsp;·&nbsp; approacher = <b>{_rn[int(ranks[EX][0])]}</b> (green),
             approachee = <b>{_rn[int(ranks[EX][1])]}</b> (blue),
             bystander = <b>{_rn[int(ranks[EX][2])]}</b> (red)
@@ -257,6 +268,10 @@ def _(mo):
           mice stays exactly the same. Only the orientation of the whole picture on the page changes.
           That rigidity is exactly why the operation is safe to apply to behavior — it changes the frame
           of reference without altering the behavior.
+
+        This slider is a *teaching control*: you set β by hand to feel that rotation preserves shape. The
+        real transform does **not** guess β — it reads the exact angle off the skeleton (the accordion
+        below the plot shows how), so there is nothing arbitrary about it.
         """
     )
     return
@@ -332,7 +347,7 @@ def _(EX, contact, cu, ex_hex, go, kp, mo, np, toy_angle):
 @app.cell(hide_code=True)
 def _(mo):
     mo.accordion({
-        "How the code picks β automatically": mo.md(
+        "How the code picks β automatically (no guessing)": mo.md(
             r"""
             We do not have to guess β. The code reads the approacher's heading angle straight off the
             skeleton and rotates by exactly the amount that lands it on +y.
@@ -356,7 +371,28 @@ def _(mo):
             tail-base is missing on every frame it cannot find a heading and returns the event
             unchanged (a failure mode we return to at the end).
             """
-        )
+        ),
+        "Why translate + rotate, and not something fancier (Procrustes)?": mo.md(
+            r"""
+            A full **Procrustes** alignment would translate, rotate, **and rescale** (and optionally
+            reflect) one shape onto another. We deliberately keep only **translate + rotate** (a *rigid*
+            motion) and leave the scale alone. The reason is scientific, not lazy:
+
+            - **Scale is signal here.** A stretched-out mouse and a hunched mouse are genuinely different
+              postures; body length is one of our 19 features. If we rescaled every event to a common
+              size we would erase exactly the posture information we want to measure.
+            - **Reflection would fabricate identity.** Flipping left/right would make a left-turn look
+              like a right-turn. We keep chirality.
+            - **We anchor on the body, not on motion.** An alternative is to point the frame along the
+              approacher's *velocity* (its direction of travel). We instead anchor on **tail-base → head
+              heading**, because a mouse can face one way while drifting another (backing up, sidestep),
+              and "which way it is pointing" is the socially meaningful axis. The cost: the heading needs
+              a valid head and tail-base — the failure mode in the closing section.
+
+            So: rigid (translate + rotate), anchored on body heading. That is the smallest transform that
+            removes arena pose while preserving everything about the behavior.
+            """
+        ),
     })
     return
 
@@ -369,38 +405,97 @@ def _(mo):
         ## 2. Applying the transform to the example event
 
         Now compare the two coordinate frames side by side. On the **left** is the raw arena view — the
-        mice are wherever they happened to be in the cage. On the **right** is the same frame after
-        `cu.allocentricize`: the approacher's tail-base is pinned at the origin (black ✕) and the
-        approacher's heading is fixed. Everything that still moves on the right is **social geometry** —
-        where the other two mice sit *relative to the approacher*. Drag the frame slider and watch the
-        approachee close in while the approacher stays put.
+        mice are wherever they happened to be in the cage, drawn in image coordinates (y grows downward,
+        the camera convention). On the **right** is the same frame after `cu.allocentricize`, drawn with
+        y pointing **up** so "ahead of the approacher" reads as up on the page. At the **anchor frame**
+        (where the slider starts) the approacher's tail-base sits exactly on the origin (black ✕) and its
+        heading points straight up.
+
+        Now drag the frame slider forward and watch carefully: the approacher **does not stay glued to
+        the origin.** It drifts away as the clip plays. That is not a bug — it is the single most
+        important thing to understand about this transform, and the next box explains why we want it that
+        way.
         """
     )
     return
 
 
 @app.cell
-def _(EX, contact, kp, mo):
+def _(ANCHOR, EX, kp, mo):
     _T = kp[EX].shape[0]
-    ex_frame = mo.ui.slider(0, _T - 1, value=int(contact[EX]), step=1,
-                            label="frame (red dot = contact onset)", debounce=True, full_width=True)
+    ex_frame = mo.ui.slider(0, _T - 1, value=ANCHOR, step=1,
+                            label="frame (slider starts at the anchor frame)",
+                            debounce=True, full_width=True)
     return (ex_frame,)
 
 
 @app.cell
-def _(EX, cu, ex_frame, ex_hex, kp, mo):
+def _(ANCHOR, EX, contact, cu, ex_frame, ex_hex, go, kp, mo, np):
     _raw = kp[EX].astype(float)
     _body = cu.allocentricize(_raw)
     _t = ex_frame.value
+
+    # LEFT: raw arena view (image convention, y grows downward) via the shared skeleton helper.
     _fig_raw = cu.skeleton_fig(_raw[_t], cu.SKELETON_EDGES, colors=ex_hex,
                                title=f"RAW arena — frame {_t}", height=460)
-    _fig_body = cu.skeleton_fig(_body[_t], cu.SKELETON_EDGES, colors=ex_hex,
-                                title=f"BODY FRAME — frame {_t} (approacher pinned at origin)",
-                                height=460)
-    # mark the approacher origin on the body-frame panel
+
+    # RIGHT: body frame, built by hand so y points UP (heading up), NOT the reversed image axis.
+    _fig_body = go.Figure()
+    for _m in range(3):
+        _mk = _body[_t, _m]
+        _ok = np.isfinite(_mk).all(1)
+        _ex, _ey = [], []
+        for _u, _v in cu.SKELETON_EDGES:
+            if _ok[_u] and _ok[_v]:
+                _ex += [_mk[_u, 0], _mk[_v, 0], None]
+                _ey += [_mk[_u, 1], _mk[_v, 1], None]
+        _fig_body.add_scatter(x=_ex, y=_ey, mode="lines", line=dict(color=ex_hex[_m], width=2),
+                              showlegend=False, hoverinfo="skip")
+        _fig_body.add_scatter(x=_mk[_ok, 0], y=_mk[_ok, 1], mode="markers",
+                              marker=dict(color=ex_hex[_m], size=7), showlegend=False, hoverinfo="skip")
+    # mark the approacher origin (where the tail-base pins at the anchor frame)
     _fig_body.add_scatter(x=[0], y=[0], mode="markers",
-                          marker=dict(symbol="x", size=12, color="black"), showlegend=False)
+                          marker=dict(symbol="x", size=13, color="black"), showlegend=False,
+                          hoverinfo="skip")
+    # how far the approacher's tail-base has drifted from the origin on THIS frame
+    _tti = _body[_t, 0, cu.TTI]
+    _drift = float(np.linalg.norm(_tti)) if np.isfinite(_tti).all() else float("nan")
+    _tag = "pinned at origin" if _t == ANCHOR else f"tail-base has drifted {_drift:.0f} px from origin"
+    _fig_body.update_xaxes(showgrid=False, zeroline=True, title="x (px, body frame)")
+    _fig_body.update_yaxes(showgrid=False, zeroline=True, scaleanchor="x", scaleratio=1,
+                           title="y (px) — approacher heading is UP")
+    _fig_body.update_layout(template="plotly_white", height=460, margin=dict(l=10, r=10, t=44, b=10),
+                            title=f"BODY FRAME — frame {_t} · {_tag}")
     mo.vstack([ex_frame, mo.hstack([_fig_raw, _fig_body], widths=[1, 1])])
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(
+        r"""
+        > ### Why one anchor frame, and not per-frame re-centering?
+        >
+        > The transform reads the approacher's position and heading from **one** frame — the anchor —
+        > and then applies that *same* translation and rotation to **every** frame of the event. It does
+        > **not** re-center the approacher on each frame. So the approacher is exactly on the origin only
+        > at the anchor frame; on every other frame it moves around inside the body frame, exactly as it
+        > moves around in the real world.
+        >
+        > That is deliberate, and here is the reasoning. Several of our features describe **change over
+        > time within the event** — how fast the gap closes (`closing_speed`), how fast each mouse moves
+        > (`appr_speed_mean`), how much each one turns (`appe_angvel`). A speed is a difference between
+        > frames. If we re-centered the approacher on every frame it would appear frozen at the origin,
+        > its own speed would be forced to zero, and every relative motion would be measured against a
+        > moving, wobbling reference point — the numbers would be meaningless. By fixing **one** reference
+        > frame for the whole event, all the motion is preserved and simply re-expressed from the
+        > approacher's starting point of view.
+        >
+        > **The lesson:** "put it in the body frame" means *choose one consistent frame of reference for
+        > the whole clip*, not *pin the animal in place at every instant*. The drift you see when you drag
+        > the slider is real behavior, faithfully kept.
+        """
+    )
     return
 
 
@@ -416,13 +511,14 @@ def _(mo):
         describe it plainly for what it is: a **body-centered (egocentric) transform** — the scene
         expressed relative to the approacher's own body.
 
-        The point of the transform is what it *removes*. By centering on the approacher's tail-base and
-        rotating its heading, we throw away the approacher's own arena pose: where it stands and which
-        way it faces in the cage. Those are not part of the behavior. What survives is the **relative
-        configuration** — how far apart the mice are, who faces whom, how the trio is arranged — and that
-        relative configuration is identical for the same behavior in any corner of the cage. Section 5
-        demonstrates that invariance directly and lets us watch a feature refuse to move while the arena
-        spins.
+        The point of the transform is what it *removes*. By centering on the approacher's tail-base (at
+        the anchor frame) and rotating its heading to a fixed direction, we throw away the approacher's
+        own arena pose: where it stood and which way it faced in the cage at that instant. Those are not
+        part of the behavior. What survives is the **relative configuration** — how far apart the mice
+        are, who faces whom, how the trio is arranged, and how all of that changes over the clip — and
+        that relative configuration is identical for the same behavior in any corner of the cage.
+        Section 5 demonstrates that invariance directly and lets us watch a feature refuse to move while
+        the arena spins.
         """
     )
     return
@@ -469,20 +565,22 @@ def _(mo):
         `cu.features_one` · *purpose:* turn one event into these 19 numbers · *input:* `kp_event` of
         shape `(T, 3, 15, 2)`, mice ordered [approacher, approachee, bystander] · *output:* a length-19
         vector. Several of these are **geometric** and easiest to understand as a picture — so the next
-        figure draws them on the example event's body frame.
+        figure draws them on the example event, at the **anchor frame** (the one frame where the
+        approacher genuinely sits at the origin facing up, so the arrows and the origin marker are
+        honest).
         """
     )
     return
 
 
 @app.cell
-def _(EX, contact, cu, ex_hex, go, kp, mo, np):
-    # A labelled geometry diagram: draw the example event's BODY-FRAME skeletons at contact and mark
-    # the geometric features so they stop being names in a table. y is NOT reversed here, so "ahead of
-    # the approacher" reads as UP on the page.
+def _(ANCHOR, EX, cu, ex_hex, go, kp, mo, np):
+    # A labelled geometry diagram at the ANCHOR frame: the approacher is genuinely at the origin facing
+    # up, so the origin marker and the "faces up" heading arrow are honest. y is NOT reversed, so
+    # "ahead of the approacher" reads as UP on the page.
     _bf = cu.allocentricize(kp[EX].astype(float))
-    _t = int(contact[EX])
-    _frame = _bf[_t]                                         # (3, 15, 2) body-frame coords at contact
+    _t = ANCHOR
+    _frame = _bf[_t]                                         # (3, 15, 2) body-frame coords at anchor
     _cen = np.array([np.nanmean(_frame[_m, cu.BODY_NODES], axis=0) for _m in range(3)])  # (3, 2)
 
     _fig = go.Figure()
@@ -499,6 +597,9 @@ def _(EX, contact, cu, ex_hex, go, kp, mo, np):
                          showlegend=False, hoverinfo="skip")
         _fig.add_scatter(x=_mk[_ok, 0], y=_mk[_ok, 1], mode="markers",
                          marker=dict(color=ex_hex[_m], size=5), showlegend=False, hoverinfo="skip")
+    # origin marker (approacher tail-base, pinned here)
+    _fig.add_scatter(x=[0], y=[0], mode="markers",
+                     marker=dict(symbol="x", size=13, color="black"), name="origin (appr tail-base)")
     # triangle of the three centroids (feature 18: triangle_area_mean)
     _fig.add_scatter(x=list(_cen[[0, 1, 2, 0], 0]), y=list(_cen[[0, 1, 2, 0], 1]), mode="lines",
                      line=dict(color="#999", width=1, dash="dot"), name="trio triangle (feat 18)")
@@ -510,34 +611,36 @@ def _(EX, contact, cu, ex_hex, go, kp, mo, np):
     _fig.add_scatter(x=[_cen[0, 0], _cen[2, 0]], y=[_cen[0, 1], _cen[2, 1]], mode="lines",
                      line=dict(color="#d62728", width=1, dash="dash"),
                      name="bystander_dist (feat 16/17)")
-    # heading arrows (features 12/13/15): tail-base -> head, scaled up for visibility
+    # heading arrows (features 12/13/15): tail-base -> head, thick, scaled up for visibility
     for _m, _nm in [(0, "approacher heading"), (1, "approachee heading")]:
         _tti = _frame[_m, cu.TTI]; _head = _frame[_m, cu.HEAD]
         if np.isfinite(_tti).all() and np.isfinite(_head).all():
             _d = (_head - _tti)
-            _d = _d / (np.linalg.norm(_d) + 1e-9) * 55.0
+            _d = _d / (np.linalg.norm(_d) + 1e-9) * 60.0
             _fig.add_annotation(x=_cen[_m, 0] + _d[0], y=_cen[_m, 1] + _d[1],
                                 ax=_cen[_m, 0], ay=_cen[_m, 1], xref="x", yref="y",
                                 axref="x", ayref="y", showarrow=True, arrowhead=3,
-                                arrowwidth=2, arrowcolor=ex_hex[_m])
+                                arrowwidth=3.5, arrowcolor=ex_hex[_m])
     _fig.update_xaxes(showgrid=False, zeroline=True, title="x (px, body frame)")
     _fig.update_yaxes(showgrid=False, zeroline=True, scaleanchor="x", scaleratio=1,
                       title="y (px, body frame) — approacher faces up")
-    _fig.update_layout(template="plotly_white", height=520, margin=dict(l=10, r=10, t=50, b=10),
-                       title="The geometric features, drawn on the example event at contact",
+    _fig.update_layout(template="plotly_white", height=560, margin=dict(l=10, r=10, t=50, b=10),
+                       title="The geometric features, drawn on the example event at the anchor frame",
                        legend=dict(y=0.99, x=0.01, bgcolor="rgba(255,255,255,0.6)"))
     mo.vstack([
         _fig,
         mo.md(
             """
-            The **black dashed line** is the pair distance (`pair_dist_mean` / `pair_dist_min`). The
-            **red dashed line** is the distance to the bystander (`bystander_dist_*`). The **dotted
-            triangle** through all three centroids is what `triangle_area_mean` measures — how spread out
-            the trio is. The **arrows** are each mouse's heading; the facing features (`appr_faces_appe`,
-            `appe_faces_appr`) are the cosine of the angle between a mouse's arrow and the line to the
-            other mouse (+1 = pointing straight at it), and `heading_alignment` is the cosine between the
-            two arrows (+1 = parallel, −1 = opposed). None of these depend on where the trio sits in the
-            arena — that is the whole point.
+            The **black ✕** is the origin — the approacher's tail-base, pinned here because this is the
+            anchor frame. The **black dashed line** is the pair distance (`pair_dist_mean` /
+            `pair_dist_min`). The **red dashed line** is the distance to the bystander
+            (`bystander_dist_*`). The **dotted triangle** through all three centroids is what
+            `triangle_area_mean` measures — how spread out the trio is. The **thick arrows** are each
+            mouse's heading; the facing features (`appr_faces_appe`, `appe_faces_appr`) are the cosine of
+            the angle between a mouse's arrow and the line to the other mouse (+1 = pointing straight at
+            it), and `heading_alignment` is the cosine between the two arrows (+1 = parallel, −1 =
+            opposed). None of these depend on where the trio sits in the arena — that is the whole point,
+            which we prove next.
             """
         ),
     ])
@@ -554,13 +657,15 @@ def _(mo):
         This is the payoff of the body-centered choice. Take the example event and apply a **rigid
         motion** to the *entire scene*: rotate the whole cage by some angle and slide it somewhere else.
         On the **left** the whole interaction visibly turns — the raw pixel coordinates swing with the
-        cage. On the **right** is a single live table that reads out, side by side, two kinds of
+        cage (both the original skeletons, faint, and the rotated-and-moved ones, solid, are drawn so you
+        can see the motion). On the **right** is a live table that reads out, side by side, two kinds of
         quantity computed on that same warped event:
 
         - **Body-frame features** — the 19 numbers from `features_one`, each marked **invariant**. Their
           *original* and *warped* values are identical to within rounding (the `change` column is
           essentially zero) no matter the angle, because every feature is measured *between* the mice,
-          not against the arena walls.
+          not against the arena walls. We list a representative handful plus a one-line summary over all
+          19.
         - **Arena-frame measurements** — the approacher's absolute heading angle and its centroid
           position in the cage, each marked **CHANGES**. These move on every turn of the slider, because
           they describe where the mouse is and which way it points in the arena.
@@ -575,14 +680,14 @@ def _(mo):
 
 @app.cell
 def _(mo):
-    inv_angle = mo.ui.slider(0, 350, value=0, step=10,
+    inv_angle = mo.ui.slider(0, 350, value=120, step=10,
                              label="arena rotation applied to the whole event (degrees)",
                              debounce=True, full_width=True)
     return (inv_angle,)
 
 
 @app.cell
-def _(EX, cu, feat_names, go, inv_angle, kp, mo, np):
+def _(EX, cu, ex_hex, feat_names, go, inv_angle, kp, mo, np):
     _ev = kp[EX].astype(float)
     _f0 = cu.features_one(_ev)                              # 19 features, original
     _th = np.deg2rad(inv_angle.value)
@@ -592,20 +697,28 @@ def _(EX, cu, feat_names, go, inv_angle, kp, mo, np):
     _f1 = cu.features_one(_warp)                            # 19 features, after the rigid warp
     _maxdiff = float(np.nanmax(np.abs(_f0 - _f1)))
 
-    # left: raw node cloud at contact, original vs warped -> the coordinates (the whole interaction)
-    # clearly swing with the cage.
+    # LEFT: original (faint) and warped (solid) SKELETONS at the mid frame, colored by rank, so the
+    # rigid motion of the whole interaction is visible as skeletons rather than an anonymous point cloud.
     _t = _ev.shape[0] // 2
-    _p0 = _ev[_t].reshape(-1, 2); _p0 = _p0[np.isfinite(_p0).all(1)]
-    _p1 = _warp[_t].reshape(-1, 2); _p1 = _p1[np.isfinite(_p1).all(1)]
     _left = go.Figure()
-    _left.add_scatter(x=_p0[:, 0], y=_p0[:, 1], mode="markers",
-                      marker=dict(color="#7f7f7f", size=6), name="original")
-    _left.add_scatter(x=_p1[:, 0], y=_p1[:, 1], mode="markers",
-                      marker=dict(color="#d62728", size=6), name="rotated + moved")
-    _left.update_yaxes(scaleanchor="x", scaleratio=1, showgrid=False)
+    for _tag, _arr, _op, _wid in [("original", _ev, 0.28, 1.5), ("rotated + moved", _warp, 1.0, 2.5)]:
+        for _m in range(3):
+            _mk = _arr[_t, _m]
+            _ok = np.isfinite(_mk).all(1)
+            _ex, _ey = [], []
+            for _u, _v in cu.SKELETON_EDGES:
+                if _ok[_u] and _ok[_v]:
+                    _ex += [_mk[_u, 0], _mk[_v, 0], None]
+                    _ey += [_mk[_u, 1], _mk[_v, 1], None]
+            _left.add_scatter(x=_ex, y=_ey, mode="lines", opacity=_op,
+                              line=dict(color=ex_hex[_m], width=_wid),
+                              name=(_tag if _m == 0 else None),
+                              showlegend=(_m == 0), legendgroup=_tag, hoverinfo="skip")
+    _left.update_yaxes(autorange="reversed", scaleanchor="x", scaleratio=1, showgrid=False)
     _left.update_xaxes(showgrid=False)
-    _left.update_layout(template="plotly_white", height=520,
-                        title="RAW pixel coordinates — the whole interaction swings", legend=dict(y=1.0),
+    _left.update_layout(template="plotly_white", height=560,
+                        title="RAW pixel coordinates — the whole interaction swings",
+                        legend=dict(y=0.99, x=0.01, bgcolor="rgba(255,255,255,0.6)"),
                         margin=dict(l=10, r=10, t=50, b=10))
 
     # arena-frame quantities that DO change: heading angle + centroid position (mid frame)
@@ -619,11 +732,14 @@ def _(EX, cu, feat_names, go, inv_angle, kp, mo, np):
     _h0, _x0, _y0 = _arena_meas(_ev)
     _h1, _x1, _y1 = _arena_meas(_warp)
 
-    # RIGHT (replaces the old "features frozen on the diagonal" scatter): one live table listing every
-    # feature's value before vs after the warp, marked invariant vs changing. The 19 body-frame
-    # features are invariant (change ~ 0); the three arena-frame rows CHANGE with the slider.
-    _rows = [f"| `{_nm}` | invariant | {_a:.3f} | {_b:.3f} | {abs(_a - _b):.1e} |"
-             for _nm, _a, _b in zip(feat_names, _f0, _f1)]
+    # RIGHT: a COMPACT table — four representative invariant features + a one-line summary over all 19,
+    # then the three arena-frame rows that DO change. (The old version listed all 19 rows; a handful
+    # plus the summary makes the same point without the wall of text.)
+    _show = ["pair_dist_mean", "appe_faces_appr", "heading_alignment", "triangle_area_mean"]
+    _rows = []
+    for _nm in _show:
+        _k = feat_names.index(_nm)
+        _rows.append(f"| `{_nm}` | invariant | {_f0[_k]:.3f} | {_f1[_k]:.3f} | {abs(_f0[_k] - _f1[_k]):.1e} |")
     _rows += [
         f"| approacher heading (deg) | **CHANGES** | {_h0:+.1f} | {_h1:+.1f} | {abs(_h1 - _h0):.1f} |",
         f"| approacher centroid x (px) | **CHANGES** | {_x0:.0f} | {_x1:.0f} | {abs(_x1 - _x0):.0f} |",
@@ -631,16 +747,16 @@ def _(EX, cu, feat_names, go, inv_angle, kp, mo, np):
     ]
     _table = mo.md(
         f"""
-        **Feature-by-feature readout at arena rotation β = {inv_angle.value}°**
-        (largest body-frame change across all 19 features: |Δ| = {_maxdiff:.2e} — numerically zero)
+        **Readout at arena rotation β = {inv_angle.value}°**
 
         | quantity | kind | original | warped | change |
         |---|---|---:|---:|---:|
         {chr(10).join("        " + _r for _r in _rows)}
 
-        Every row marked **invariant** has an identical original and warped value (`change` ≈ 0),
-        no matter the angle. The three **CHANGES** rows — heading and centroid position, defined
-        against the arena — move on every turn. That is exactly what "arena-invariant" means.
+        **Summary over all 19 features:** the largest change of any body-frame feature is
+        |Δ| = {_maxdiff:.2e} — numerically zero, at every angle. The three **CHANGES** rows — heading and
+        centroid position, defined against the arena — swing on every turn of the slider. That is exactly
+        what "arena-invariant" means.
         """
     )
     mo.vstack([inv_angle, mo.hstack([_left, _table], widths=[1, 1])])
@@ -715,12 +831,14 @@ def _(mo):
           standard-deviation units. It is a plain, unitless **effect size**: |d| ≈ 0.2 is small, 0.5
           medium, 0.8 large. `cu.cohens_d(X, agg)` returns one d per feature.
         - **Mann–Whitney U** — a rank-based test of whether two groups' distributions differ, reported
-          as a p-value.
+          as a p-value. A p-value answers *"is there any difference at all?"*; it does **not** say how
+          big.
 
-        The chart below ranks all 19 features by |Cohen's d|. The pattern is the headline result of this
-        notebook: the **kinematic** features (the approachee's angular velocity and speed above all)
-        separate aggression far more strongly than the **geometry** features (facing, alignment,
-        bystander distance). Aggression is a matter of *motion*, not of *where* the mice are.
+        The chart below ranks all 19 features by |Cohen's d|, with a **bootstrap 95% confidence
+        interval** on each bar (we resample the events with replacement 300 times and recompute d, so the
+        error bar shows how stable the estimate is). A bar whose interval **crosses zero** cannot be
+        distinguished from "no difference." Orange bars are kinematic features; blue bars are
+        posture/geometry features.
         """
     )
     return
@@ -729,25 +847,41 @@ def _(mo):
 @app.cell
 def _(X, agg, cu, feat_names, go, np):
     _d = cu.cohens_d(X, agg)                                # (19,) per-feature effect size
+    # bootstrap 95% CI on each d: resample events with replacement, recompute d, take percentiles.
+    _rng = np.random.RandomState(0)
+    _boot = np.empty((300, X.shape[1]), float)
+    _N = len(agg)
+    for _b in range(300):
+        _idx = _rng.randint(0, _N, _N)
+        _boot[_b] = cu.cohens_d(X[_idx], agg[_idx])
+    _lo = np.percentile(_boot, 2.5, axis=0)
+    _hi = np.percentile(_boot, 97.5, axis=0)
+
     _order = np.argsort(np.abs(_d))                         # ascending, so largest ends up on top
     _kin = {"appr_speed_mean", "appr_speed_max", "appe_speed_mean", "appe_speed_max",
             "appr_angvel", "appe_angvel", "closing_speed"}
     _names = [feat_names[i] for i in _order]
     _vals = _d[_order]
     _cols = ["#f58518" if feat_names[i] in _kin else "#4c78a8" for i in _order]
+
     _fig = go.Figure()
-    # lollipop stems from 0 to d
+    # stems from 0 to d
     for _y, _v, _c in zip(range(len(_vals)), _vals, _cols):
         _fig.add_scatter(x=[0, _v], y=[_y, _y], mode="lines", line=dict(color=_c, width=2),
                          showlegend=False, hoverinfo="skip")
-    _fig.add_scatter(x=_vals, y=list(range(len(_vals))), mode="markers",
-                     marker=dict(size=10, color=_cols, line=dict(width=0.5, color="white")),
-                     text=_names, hovertemplate="%{text}<br>Cohen's d = %{x:+.2f}<extra></extra>",
-                     showlegend=False)
+    # bootstrap CI whiskers
+    _fig.add_scatter(
+        x=_vals, y=list(range(len(_vals))), mode="markers",
+        marker=dict(size=10, color=_cols, line=dict(width=0.5, color="white")),
+        error_x=dict(type="data", symmetric=False,
+                     array=(_hi[_order] - _vals), arrayminus=(_vals - _lo[_order]),
+                     thickness=1.4, width=4, color="#888"),
+        text=_names, hovertemplate="%{text}<br>Cohen's d = %{x:+.2f}<extra></extra>",
+        showlegend=False)
     _fig.add_vline(x=0, line_color="#333", line_width=1)
     _fig.update_yaxes(tickmode="array", tickvals=list(range(len(_names))), ticktext=_names)
-    _fig.update_xaxes(title="Cohen's d  (aggression − not aggression, in SD units)")
-    _fig.update_layout(template="plotly_white", height=560,
+    _fig.update_xaxes(title="Cohen's d  (aggression − not aggression, in SD units) · bars = bootstrap 95% CI")
+    _fig.update_layout(template="plotly_white", height=580,
                        title="Effect size per feature — orange = kinematic, blue = posture/geometry",
                        margin=dict(l=10, r=10, t=50, b=10))
     _fig
@@ -758,15 +892,113 @@ def _(X, agg, cu, feat_names, go, np):
 def _(mo):
     mo.md(
         r"""
-        Pick any feature below to see its full distribution in each group. The **violin** shows the
-        shape of the distribution (a smoothed, mirrored histogram) with **every individual event drawn
-        as a point** and a mean line — never a bare bar of averages. The **ECDF** beneath it (the
-        empirical cumulative distribution) is a second, binning-free view: for each value on the x-axis
-        it reads off the fraction of events at or below that value, so two curves that pull apart mean
-        the groups genuinely differ. The header reports the Mann–Whitney p-value and Cohen's d.
+        The result is more interesting than a simple "motion beats geometry." Reading from the top:
 
-        Start on `appe_angvel` (how fast the approachee turns) and watch the two clouds separate; then
-        try `heading_alignment` and see them sit almost on top of each other.
+        - The **two strongest** features are kinematic and both belong to the **approachee** — how fast
+          it turns (`appe_angvel`, d ≈ +0.97) and how fast it moves (`appe_speed_mean`, d ≈ +0.81). When
+          an approach is aggressive, the mouse being approached *reacts*.
+        - But the **3rd and 4th strongest are geometry**, not kinematics: `appe_faces_appr` (d ≈ −0.78)
+          and `appr_nose_to_appe_tti_min` (d ≈ −0.78). Both are **negative** for aggression: the
+          approachee turns its face **away** (fleeing, not orienting toward), while the approacher's nose
+          gets **closer** to the approachee's rear. That is the signature of a rear-directed chase or
+          attack.
+        - At the bottom, two features are **indistinguishable** between the groups — their CIs straddle
+          zero: `appr_speed_max` (d ≈ −0.03) and `heading_alignment` (d ≈ +0.02). Whether the two mice's
+          headings happen to be parallel says essentially nothing about aggression here.
+
+        So aggression is carried by a **combination**: the approachee's motion *and* the relative
+        geometry of an attack from behind. Keeping all 19 features, rather than betting on a single one,
+        is what lets the later notebooks find that combination.
+        """
+    )
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(
+        r"""
+        > ### A p-value is not an effect size
+        >
+        > Look at `triangle_area_mean` near the bottom of the chart: its Cohen's d is only **≈ 0.17** (a
+        > *small* effect — the two groups' trio-spread distributions almost completely overlap), yet its
+        > Mann–Whitney p-value is **≈ 3e-11** (overwhelmingly "significant"). How can something so tiny be
+        > so significant?
+        >
+        > Because we have **2499 events.** With that many observations, even a trivial difference in means
+        > is detectable — the p-value measures *"are we sure there is any difference?"*, and with large n
+        > the answer is yes for almost everything. It says **nothing** about whether the difference is
+        > big enough to matter. Cohen's d answers the second, separate question: *how large is the
+        > difference, in units a human can judge?*
+        >
+        > This is one of the most common ways an analysis misleads, and we return to it in NB05. The
+        > habit to build now: **report the effect size next to the p-value, and never read a small p as
+        > "a big effect."** The scatter below makes the point across all 19 features at once — significance
+        > (up) and effect size (right) are related but genuinely different axes.
+        """
+    )
+    return
+
+
+@app.cell
+def _(X, agg, cu, feat_names, go, np):
+    # p-value vs effect size across all 19 features: significance (y) and effect size (x) are different
+    # axes. triangle_area_mean is far up (tiny p) yet barely right of zero (small |d|).
+    from scipy.stats import mannwhitneyu as _mwu
+    _d = cu.cohens_d(X, agg)
+    _absd, _neglogp = [], []
+    for _i in range(X.shape[1]):
+        _a = X[:, _i][agg == 1]; _b = X[:, _i][agg == 0]
+        _a = _a[np.isfinite(_a)].astype(np.float64); _b = _b[np.isfinite(_b)].astype(np.float64)
+        _u, _p = _mwu(_a, _b)                               # float64 -> no underflow
+        _absd.append(abs(float(_d[_i])))
+        _neglogp.append(-np.log10(max(_p, 1e-300)))
+    _absd = np.array(_absd); _neglogp = np.array(_neglogp)
+    _hi = {"triangle_area_mean", "appe_angvel"}
+    _cols = ["#d62728" if feat_names[_i] in _hi else "#4c78a8" for _i in range(len(feat_names))]
+
+    _fig = go.Figure()
+    _fig.add_scatter(x=_absd, y=_neglogp, mode="markers", text=feat_names,
+                     marker=dict(size=9, color=_cols, line=dict(width=0.5, color="white")),
+                     hovertemplate="%{text}<br>|d| = %{x:.2f}<br>-log10 p = %{y:.1f}<extra></extra>",
+                     showlegend=False)
+    for _nm in _hi:
+        _i = feat_names.index(_nm)
+        _fig.add_annotation(x=_absd[_i], y=_neglogp[_i], text=_nm, showarrow=True, arrowhead=2,
+                            ax=30, ay=-24, font=dict(size=12, color="#d62728"))
+    _fig.add_vline(x=0.2, line_dash="dot", line_color="#999")
+    _fig.add_annotation(x=0.2, y=0, yref="paper", yanchor="bottom", showarrow=False,
+                        text="  |d| = 0.2 (small)", font=dict(size=11, color="#777"), xanchor="left")
+    _fig.update_xaxes(title="effect size  |Cohen's d|", showgrid=False)
+    _fig.update_yaxes(title="significance  −log10(Mann–Whitney p)", showgrid=False)
+    _fig.update_layout(template="plotly_white", height=460,
+                       title="Significance and effect size are different axes (n = 2499)",
+                       margin=dict(l=10, r=10, t=50, b=10))
+    _fig
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(
+        r"""
+        ### See one feature's full distribution
+
+        The chart above squeezed each feature to one number. Pick any feature below to see its **whole
+        distribution** in each group. Two views are shown, because they answer different questions:
+
+        - The **violin** shows the *shape* of each distribution (a smoothed, mirrored histogram) with the
+          raw points drawn beside it and a mean line. It is honest only when n is large and the two
+          shapes genuinely differ.
+        - The **ECDF** (empirical cumulative distribution function) beneath it reads, for each value on
+          the x-axis, the *fraction of events at or below that value*. Two curves that pull apart mean the
+          groups genuinely differ, and — unlike the violin — the ECDF never invents structure or spills
+          past impossible values. For a **small shift** or a **heavy tail** it is the clearer chart; the
+          box below the plot says when to trust which.
+
+        The header reports the Mann–Whitney p-value (computed in float64 so a tiny value never prints as
+        `0.0e+00`) and Cohen's d. Start on `appe_angvel` and watch the two clouds separate; then try
+        `heading_alignment` and see them sit almost on top of each other.
         """
     )
     return
@@ -781,21 +1013,23 @@ def _(feat_names, mo):
 
 @app.cell
 def _(X, agg, cu, feat_names, feat_pick, mo, np):
-    from scipy.stats import mannwhitneyu
+    from scipy.stats import mannwhitneyu as _mwu
     _i = feat_names.index(feat_pick.value)
     _vals = X[:, _i]
     _grp = np.where(agg == 1, "aggression", "not aggression")
     _cols = {"aggression": cu.RANK_HEX[1], "not aggression": "#7f7f7f"}   # red vs gray
 
+    # float64 BEFORE the test so an extremely small p does not underflow to exactly 0 (the old bug).
     _a = _vals[agg == 1]; _b = _vals[agg == 0]
-    _u, _p = mannwhitneyu(_a[np.isfinite(_a)], _b[np.isfinite(_b)])
+    _a = _a[np.isfinite(_a)].astype(np.float64); _b = _b[np.isfinite(_b)].astype(np.float64)
+    _u, _p = _mwu(_a, _b)
     _d = float(cu.cohens_d(X, agg)[_i])
-    _ptxt = f"p = {_p:.1e}" if _p >= 1e-300 else "p < 1e-300"
+    _ptxt = cu.fmt_p(_p)                                    # never prints 0.0e+00
 
     _violin = cu.violin_points_fig(
         _vals, _grp, group_order=["not aggression", "aggression"], colors=_cols,
         ylabel=feat_pick.value, robust=True,   # clip the value axis to [1, 99] pct so outliers don't skew it
-        title=f"{feat_pick.value}   ·   Mann–Whitney {_ptxt}   ·   Cohen's d = {_d:+.2f}",
+        title=f"{feat_pick.value}   ·   Mann–Whitney p = {_ptxt}   ·   Cohen's d = {_d:+.2f}",
         height=440)
     _ecdf = cu.ecdf_fig(
         _vals, _grp, group_order=["not aggression", "aggression"], colors=_cols,
@@ -806,18 +1040,49 @@ def _(X, agg, cu, feat_names, feat_pick, mo, np):
 
 @app.cell(hide_code=True)
 def _(mo):
+    mo.accordion({
+        "Violin vs ECDF vs strip — which chart, when?": mo.md(
+            r"""
+            All three show a distribution; they fail in different places.
+
+            - **Violin (KDE):** good for a *large* sample whose two groups differ in **shape** (e.g. one
+              is bimodal). Its danger: the kernel-density smoothing **invents** structure when n is small
+              or the shift is tiny, and it can draw mass past impossible values (a speed below zero, a
+              fraction above one). Do not trust a violin for a subtle effect.
+            - **ECDF:** the safest default for comparing **whether one group tends to be larger** (a tail
+              or shift question). It plots the real data with no smoothing, so it never fabricates
+              density. Two curves that separate = stochastic dominance. Slightly harder to read a *mode*
+              from.
+            - **Strip / raincloud (every point):** best for **small n**, where you want to see each
+              observation and a violin would be a lie. Gets cluttered for thousands of points.
+
+            Rule of thumb for this course: **subtle shift or small n → ECDF or strip; large n with a real
+            shape difference → violin is fine.** Try `triangle_area_mean` (small, d ≈ 0.17) in the
+            dropdown: the violins look nearly identical, but the ECDF curves still separate cleanly — the
+            ECDF is doing the honest work.
+            """
+        )
+    })
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
     mo.md(
         r"""
-        One more piece of EDA before the exercise. The 19 features are **not independent** — many carry
-        overlapping information. To see a correlation honestly, plot the two features against each other
-        as **individual points** (one dot per event, hover for its index) rather than a density blob:
-        the scatter below shows `pair_dist_mean` vs `pair_dist_min`, with the least-squares fit line and
-        the **Pearson r** annotated in the corner. `r` runs from −1 (perfect anti-correlation) through 0
-        (unrelated) to +1 (perfectly linearly related). The two features track each other tightly (large
-        positive `r`): events where the mice are far apart on average are also events where their closest
-        approach is far. When features are this redundant, 19 numbers are really only a handful of
-        independent directions — which is exactly the motivation for the dimensionality reduction we take
-        up in **NB03**.
+        ### The 19 numbers are not 19 independent facts
+
+        One more piece of EDA before the exercise. The features are **not independent** — many carry
+        overlapping information. To see a correlation honestly, plot two features against each other as
+        **individual points** (one dot per event, hover for its index) rather than a density blob. The
+        scatter below shows the **most redundant pair in the whole set**, `bystander_dist_mean` vs
+        `bystander_dist_min`, with the least-squares fit line and the **Pearson r** annotated. `r` runs
+        from −1 (perfect anti-correlation) through 0 (unrelated) to +1 (perfectly linearly related).
+
+        These two track each other almost perfectly (r ≈ 0.92): when the bystander is far on average, its
+        closest approach is also far. Knowing one tells you most of the other. When features are this
+        redundant, 19 numbers are really only a handful of independent directions — which is exactly the
+        motivation for the dimensionality reduction we take up in **NB04**.
         """
     )
     return
@@ -825,15 +1090,17 @@ def _(mo):
 
 @app.cell
 def _(X, cu, feat_names, np):
-    _i = feat_names.index("pair_dist_mean")
-    _j = feat_names.index("pair_dist_min")
+    _i = feat_names.index("bystander_dist_mean")
+    _j = feat_names.index("bystander_dist_min")
     # Individual points (NOT a density) with an annotated Pearson r — the honest way to show a
-    # correlation. Robust axes clip to the 1st/99th percentile so a few far-apart events do not
-    # compress the bulk of the cloud (those outliers are still plotted, just off the default view).
+    # correlation. Lower opacity so the ~2500 points do not smear into a solid blob. Robust axes clip
+    # to the 1st/99th percentile so a few far-apart events do not compress the bulk of the cloud (those
+    # outliers are still plotted, just off the default view).
     cu.scatter_points_fig(
         X[:, _i], X[:, _j], hover=np.arange(len(X)), annotate_r=True, trendline=True, robust=True,
-        xlabel="pair_dist_mean (px)", ylabel="pair_dist_min (px)",
-        title="Two features that move together — 19 numbers are not 19 independent facts",
+        opacity=0.35,
+        xlabel="bystander_dist_mean (px)", ylabel="bystander_dist_min (px)",
+        title="The most redundant pair — 19 numbers are not 19 independent facts",
         height=460)
     return
 
@@ -843,7 +1110,7 @@ def _(mo):
     mo.md(
         r"""
         ---
-        ## 7. Exercise — do aggressive approaches provoke a faster reaction?
+        ## 7. Exercise — do aggressive approaches provoke a stronger reaction?
 
         ### Python skill practiced: **array arithmetic + boolean masks**
 
@@ -854,17 +1121,20 @@ def _(mo):
 
         ### Why ask this
 
-        The effect-size chart said aggression is kinematic, and the single strongest feature was
-        `appe_angvel` — **how fast the approachee turns**. That makes biological sense: when an approach
-        is aggressive, the approached mouse *reacts* — it spins, flinches, tries to flee. We will make
-        that precise: split events into those where the approachee turned a lot vs a little, and compare
-        the **aggression base rate** in each half.
+        The effect-size chart said the single strongest feature was `appe_angvel` — **how fast the
+        approachee turns**. That makes biological sense: when an approach is aggressive, the approached
+        mouse *reacts* — it spins, flinches, tries to flee. We will make that precise: split events into
+        those where the approachee turned a lot vs a little, and compare the **aggression rate** in each
+        half — with a **confidence interval**, because a rate from a finite sample is an estimate, not an
+        exact truth.
 
         ### Definitions you need
 
         - `appe_angvel` — feature #7, the approachee's mean heading angular velocity (turning rate).
-        - **base rate** — the fraction of events that are aggression; here `agg` is a 0/1 array, so a
-          fraction is just `agg[mask].mean()`.
+        - **aggression rate** — the fraction of events that are aggression; here `agg` is a 0/1 array, so
+          a fraction is just `agg[mask].mean()`.
+        - **Wilson confidence interval** — an honest error bar on a proportion, given how many events went
+          into it. `cu.wilson_ci(successes, total)` returns `(low, high)`; the figure draws it for you.
 
         ### What to do
 
@@ -894,32 +1164,31 @@ def _(X, agg, feat_names, np):
     calm = ~spun                             # the other half (logical NOT of your mask) — written for you
 
     # --- TODO 2 --------------------------------------------------------------------------------------
-    # Compute the aggression BASE RATE inside the high-turning half. `agg` is a 0/1 array, so the mean
-    # of the masked slice is the fraction that are aggression.
+    # Compute the aggression RATE inside the high-turning half. `agg` is a 0/1 array, so the mean of the
+    # masked slice is the fraction that are aggression.
     # WHY it matters: comparing this number to the low-turning half is the whole result — if a fast
     # reaction accompanies aggression, this should be much larger than rate_calm.
     # Replace the placeholder 0.0 with  agg[spun].mean()  (index agg with your boolean mask, then mean).
     rate_spun = 0.0                          # TODO 2: change to  agg[spun].mean()
     rate_calm = agg[calm].mean()             # the low-turning half's rate — written for you
     # ================================================================================================
-    return calm, rate_calm, rate_spun, spun, thr, turn
+    return calm, rate_calm, rate_spun, spun
 
 
 @app.cell
-def _(agg, cu, np, rate_calm, rate_spun, spun, thr, turn):
-    # Expected picture: two violins of the approachee's turning rate, one for each half of the split.
-    # The "high-turn" violin sits well above the "low-turn" one (by construction, since we split on it),
-    # and its title-reported aggression rate is far higher (~0.51 vs ~0.13). If your mask is wrong, the
-    # split will not separate and the two rates will be equal.
-    _grp = np.where(spun, f"high turn  (agg rate {rate_spun:.2f})",
-                          f"low turn  (agg rate {rate_calm:.2f})")
-    _order = [f"low turn  (agg rate {rate_calm:.2f})", f"high turn  (agg rate {rate_spun:.2f})"]
-    _cols = {_order[0]: "#7f7f7f", _order[1]: cu.RANK_HEX[1]}
-    cu.violin_points_fig(
-        turn, _grp, group_order=_order, colors=_cols, ylabel="appe_angvel (turning rate)",
-        robust=True,   # clip the value axis to [1, 99] pct so a few extreme turners don't skew the view
-        title=f"Median split on approachee turning rate (threshold {thr:.3f})",
-        height=440)
+def _(agg, calm, cu, spun):
+    # Expected picture: TWO POINTS — the aggression RATE in each half — each with a Wilson 95% CI. This
+    # plots the OUTCOME (the rate), NOT the variable we split on, so it is an honest test of the claim.
+    # The high-turn point should sit far above the low-turn one (~0.51 vs ~0.13), their error bars not
+    # overlapping. If your mask is wrong, the two points collapse together or the high-turn n goes to 0.
+    _counts = [int(agg[calm].sum()), int(agg[spun].sum())]      # aggression events in each half
+    _totals = [int(calm.sum()), int(spun.sum())]                # total events in each half
+    cu.proportion_ci_fig(
+        _counts, _totals, labels=["low turn", "high turn"],
+        colors={"low turn": "#7f7f7f", "high turn": cu.RANK_HEX[1]},
+        group_order=["low turn", "high turn"],
+        ylabel="aggression rate", xlabel="approachee turning-rate half",
+        title="Aggression rate by turning-rate half (points = rate, bars = Wilson 95% CI)")
     return
 
 
@@ -931,16 +1200,17 @@ def _(mo):
             Fill the two blanks like this:
 
             ```python
-            spun = turn > thr          # TODO 1: a boolean mask, True where turning rate beats the median
+            spun = turn > thr              # TODO 1: a boolean mask, True where turning rate beats the median
             rate_spun = agg[spun].mean()   # TODO 2: aggression fraction inside that mask
             ```
 
             **What you should find:** aggression is roughly **0.51** in the high-turning half and only
-            about **0.13** in the low-turning half — a nearly four-fold difference from a single
-            kinematic feature. The high-turn violin sits far above the low-turn one. This confirms the
-            effect-size chart from the other direction: an aggressive approach is one the approached
-            mouse *reacts* to. The signal lives in **motion**, which is why we keep all 19 features
-            rather than a geometry-only summary.
+            about **0.13** in the low-turning half — a nearly four-fold difference from a single kinematic
+            feature — and the two Wilson intervals ([0.48, 0.54] vs [0.11, 0.15]) do not come close to
+            overlapping, so the gap is not a sampling fluke. This confirms the effect-size chart from the
+            other direction: an aggressive approach is one the approached mouse *reacts* to. Note that we
+            plotted the **outcome** (the aggression rate), not the turning rate we split on — plotting the
+            split variable itself would only show the split we imposed by hand, which proves nothing.
             """
         )
     })
@@ -984,14 +1254,94 @@ def _(mo):
     mo.md(
         r"""
         ---
-        ## A preview of the metadata (deferred to NB04)
+        ## 8. Exercise — how often does the transform silently fail?
+
+        ### Python skill practiced: **vectorized boolean tests across a whole array axis (`.all` / `.any`)**
+
+        The body-frame transform needs the approacher's **head** and **tail-base** to read a heading. If
+        *both* are missing on *every* frame of an event, `allocentricize` cannot find a heading and
+        returns the event **unchanged** — its features are then computed in raw arena coordinates and are
+        **not** invariant. No error is raised. This is failure mode 1 from the closing section, and the
+        only way to know how often it bites is to **count it**.
+
+        We will do the count without a Python loop, using two array reductions:
+
+        - `np.isfinite(a).all(axis=-1)` collapses the last (x, y) axis → `True` where a keypoint is fully
+          present.
+        - `.any(axis=1)` collapses the **time** axis → `True` if a condition holds on *at least one*
+          frame.
+
+        Fill the **one blank**. Expected answer: a small handful of events (single digits) out of 2499 —
+        rare, but not zero, and worth auditing before trusting `X`.
+        """
+    )
+    return
+
+
+@app.cell
+def _(cu, kp, np):
+    # ===================== EXERCISE — edit ONLY the line marked  # TODO , then run ===================
+    # Skill: vectorized boolean tests across a whole array axis. No Python loop.
+
+    # These two are written for you. kp is (N, T, 3, 15, 2); mouse 0 is the approacher.
+    # np.isfinite(...).all(axis=-1) is True where BOTH x and y of that keypoint are present.
+    head_ok = np.isfinite(kp[:, :, 0, cu.HEAD, :]).all(axis=-1)   # (N, T) approacher head present?
+    tti_ok = np.isfinite(kp[:, :, 0, cu.TTI, :]).all(axis=-1)     # (N, T) approacher tail-base present?
+
+    # --- TODO --------------------------------------------------------------------------------------
+    # An event is USABLE by allocentricize if, on AT LEAST ONE frame, the head AND the tail-base are
+    # BOTH present. Combine head_ok & tti_ok (elementwise AND -> (N, T)) and reduce over the TIME axis
+    # with .any(axis=1) to get one True/False per event.
+    # WHY it matters: usable == False is exactly when the transform silently falls back to raw coords.
+    # Replace the placeholder (all-False) with  (head_ok & tti_ok).any(axis=1) .
+    usable = np.zeros(len(kp), dtype=bool)   # TODO: change to  (head_ok & tti_ok).any(axis=1)
+    # ================================================================================================
+
+    n_fallback = int((~usable).sum())        # events that silently fall back to raw coordinates
+    return (n_fallback,)
+
+
+@app.cell(hide_code=True)
+def _(mo, n_fallback):
+    # Self-check: the pinned corpus value is 4 silent-fallback events out of 2499.
+    _ok = (n_fallback == 4)
+    _c = "#e8f5e9" if _ok else "#ffebee"
+    _b = "#2e7d32" if _ok else "#c62828"
+    if _ok:
+        _head = "PASS — blank correct"
+        _msg = (f"{n_fallback} of 2499 events silently fall back to raw coordinates. Rare — about "
+                f"{100 * n_fallback / 2499:.1f}% — but a real hole: for those events the 19 features are "
+                "NOT arena-invariant, and nothing warned us. This is why an audit like this belongs in "
+                "every real pipeline.")
+    else:
+        _head = "Not yet — check the TODO line"
+        _msg = (f"Your count is {n_fallback}; expected 4. The blank should be "
+                " (head_ok & tti_ok).any(axis=1) : AND the two presence masks, then reduce over the "
+                "TIME axis (axis=1) with .any so an event counts as usable if ANY frame works.")
+    mo.md(
+        f"""
+        <div style="background:{_c};border-left:6px solid {_b};padding:12px 16px;border-radius:6px">
+        <b style="color:{_b}">{_head}</b><br>
+        {_msg}
+        </div>
+        """
+    )
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(
+        r"""
+        ---
+        ## A preview of the metadata (deferred to NB05)
 
         The derived bundle also carries `cohort`, `cage`, and `sex` for every event. It is tempting to
         immediately ask questions like *"do males and females differ on some feature?"* — and the naive
         event-level test will happily hand back a tiny p-value. But events from the same cage are not
         independent observations, and a cage is either all-male or all-female, so the correct **unit of
         analysis is the cage**, not the event. Doing that comparison honestly (event-level vs cage-level,
-        with positive and negative controls) is the whole statistics section of **NB04**. We flag the
+        with positive and negative controls) is the whole statistics section of **NB05**. We flag the
         metadata here so you know it exists; we deliberately do **not** draw conclusions from it yet.
         """
     )
@@ -1014,16 +1364,19 @@ def _(mo):
 
         1. **Silent fallback to raw coordinates.** If the approacher's head or tail-base is missing on
            *every* frame, `allocentricize` cannot find a heading and returns the event **unchanged** —
-           the features are then computed in raw arena coordinates and are *not* invariant. This is
-           invisible unless we audit for it, and head/tail dropout are exactly the nodes NB01 flagged as
-           least reliable.
+           the features are then computed in raw arena coordinates and are *not* invariant. Exercise 8
+           just counted these: **4 of 2499**. Rare, but invisible unless you audit for it — and
+           head/tail dropout are exactly the nodes NB01 flagged as least reliable.
         2. **One bad frame rotates the whole scene.** The transform reads the heading from a *single*
            anchor frame. If that frame's head or tail-base is jittery, the entire event is rotated to the
-           wrong angle and every geometry feature is corrupted, with no error raised.
-        3. **Effect sizes are not causes.** `appe_angvel` separates aggression cleanly, but a large
-           Cohen's d is a description, not a mechanism. We have shown that aggression *co-occurs* with a
-           fast reaction; we have not shown what drives what. Keeping all 19 features, rather than
-           betting on one, is what lets later notebooks probe structure rather than a single ratio.
+           wrong angle and every geometry feature is corrupted, with no error raised. (This is the cost
+           of the single-anchor design from Section 2 — the same choice that keeps the motion honest.)
+        3. **Effect sizes are not causes, and small p-values are not big effects.** `appe_angvel`
+           separates aggression cleanly, but a large Cohen's d is a description, not a mechanism — we
+           showed aggression *co-occurs* with a fast reaction, not what drives what. And, as
+           `triangle_area_mean` reminded us, a microscopic p-value at n = 2499 can sit on a tiny effect.
+           Keeping all 19 features, and reading effect size next to significance, is what lets later
+           notebooks probe structure rather than a single ratio.
         """
     )
     return
@@ -1038,11 +1391,12 @@ def _(mo):
 
         **The question was:** how do we describe an interaction independent of where in the arena it
         happens and which way the animals face? **The answer:** re-express every event in the
-        approacher's own body frame — translate its tail-base to the origin and rotate its heading to a
-        fixed direction — and then summarize the result into **19 arena-invariant features**. We proved
-        the invariance by spinning the whole cage and watching the features refuse to move, and we found
-        a first real result: aggression is carried by **kinematics** (above all the approachee's turning
-        rate), not by approach geometry.
+        approacher's own body frame — translate its tail-base to the origin (at one anchor frame) and
+        rotate its heading to a fixed direction — and then summarize the result into **19 arena-invariant
+        features**. We proved the invariance by spinning the whole cage and watching the features refuse
+        to move; we learned to read an **effect size** next to a **p-value**; and we found a first real
+        result: aggression is carried by a *combination* of the approachee's kinematics (its turning and
+        speed) and the relative geometry of a rear-directed approach.
 
         The deliverable, **`X (2499, 19)`**, is what every later notebook reads instead of pixels.
 

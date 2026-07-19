@@ -445,9 +445,13 @@ def sweep_grid_fig(emb_grid, nn_values, md_values, color_key, palette, names, he
     from plotly.subplots import make_subplots
     import plotly.graph_objects as go
     n_nn, n_md = len(nn_values), len(md_values)
-    titles = [f"n_neighbors={nn}, min_dist={md:g}" for nn in nn_values for md in md_values]
-    fig = make_subplots(rows=n_nn, cols=n_md, subplot_titles=titles,
-                        horizontal_spacing=0.04, vertical_spacing=0.08)
+    # One short label per column (min_dist) and per row (n_neighbors) instead of a full title per
+    # panel — per-panel titles collide / clip at medium width. Row labels are drawn rotated on the
+    # right, so keep them short ("nn=..") to stop the longest ("nn=100") clipping into its neighbour.
+    col_titles = [f"min_dist={md:g}" for md in md_values]
+    row_titles = [f"nn={nn}" for nn in nn_values]
+    fig = make_subplots(rows=n_nn, cols=n_md, column_titles=col_titles, row_titles=row_titles,
+                        horizontal_spacing=0.02, vertical_spacing=0.04)
     groups = [g for g in names if (color_key == g).any()]
     for i in range(n_nn):
         for j in range(n_md):
@@ -459,10 +463,12 @@ def sweep_grid_fig(emb_grid, nn_values, md_values, color_key, palette, names, he
                     marker=dict(size=3, opacity=0.6, color=palette[g]),
                     legendgroup=names[g], showlegend=(i == 0 and j == 0)),
                     row=i + 1, col=j + 1)
-    fig.update_xaxes(showticklabels=False).update_yaxes(showticklabels=False)
+    # Spatial small-multiples: no ticks and no gridlines (grid off on spatial views, house style).
+    fig.update_xaxes(showticklabels=False, showgrid=False, zeroline=False)
+    fig.update_yaxes(showticklabels=False, showgrid=False, zeroline=False)
     fig.update_layout(template="plotly_white", height=height,
-                      title="UMAP parameter sweep — same points, different knobs",
-                      margin=dict(l=10, r=10, t=60, b=10))
+                      title="UMAP parameter sweep — rows = n_neighbors (nn), cols = min_dist",
+                      margin=dict(l=10, r=48, t=80, b=10))
     return fig
 
 
@@ -971,14 +977,22 @@ def synthetic_population_raster(n_neurons=60, n_trials=800, n_tuned=18, seed=7):
     return rng.poisson(np.clip(rates, 0.05, None)).astype(int), y, tuned
 
 
-def pca_loadings_fig(components, feature_names, k=3):
-    """Heatmap of the first k PC loadings across features — shows what each component 'means'."""
+def pca_loadings_fig(components, feature_names, k=6):
+    """Heatmap of the first k PC loadings across features — shows what each component 'means'.
+
+    Components are 1-INDEXED (PC1..PCk) to match the notebook prose. The colorscale is a diverging
+    RdBu_r centered at 0, so RED = a POSITIVE loading (the feature pushes an event's score UP on that
+    PC) and BLUE = negative — the same red-is-up convention the profile heatmaps use, so the two never
+    contradict. Features run along the x-axis, PC labels down the y-axis. `k` defaults to 6."""
     import plotly.graph_objects as go
     C = np.asarray(components)[:k]
-    fig = go.Figure(go.Heatmap(z=C, x=list(feature_names), y=[f"PC{i}" for i in range(k)],
-                               colorscale="RdBu", zmid=0))
+    k = C.shape[0]
+    fig = go.Figure(go.Heatmap(z=C, x=list(feature_names), y=[f"PC{i + 1}" for i in range(k)],
+                               colorscale="RdBu_r", zmid=0,
+                               colorbar=dict(title="loading")))
+    fig.update_yaxes(autorange="reversed")     # PC1 at the top
     fig.update_layout(template="plotly_white", height=110 + 55 * k,
-                      title="PCA loadings — how features combine into components",
+                      title="PCA loadings — how features combine into components (red = pushes score up)",
                       margin=dict(l=10, r=10, t=40, b=130))
     return fig
 
@@ -1080,6 +1094,17 @@ def _group_order(groups, group_order=None):
     return list(group_order) if group_order is not None else list(dict.fromkeys(np.asarray(groups).tolist()))
 
 
+def _darken(hexcolor, factor=0.7):
+    """Return a hex color scaled toward black by `factor` (0=black, 1=unchanged). Used to give
+    overlaid raw points a slightly darker fill than their group's fill silhouette so they read on
+    top of it."""
+    h = str(hexcolor).lstrip("#")
+    if len(h) != 6:
+        return hexcolor
+    r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
+    return "#%02x%02x%02x" % (int(r * factor), int(g * factor), int(b * factor))
+
+
 def _robust_range(v, lo=1.0, hi=99.0, pad=0.05):
     """Return [low, high] for a VISIBLE axis clipped to the [lo, hi] percentiles of v (default 1/99)
     with a little padding — so a handful of extreme outliers don't flatten the rest of the cloud.
@@ -1104,7 +1129,10 @@ def strip_points_fig(values, groups, group_order=None, colors=None, jitter=0.09,
     with a hover readout — the honest replacement for a bar-of-means. A short horizontal line marks
     each group mean. `values` (N,) numeric; `groups` (N,) categorical labels; optional `hover` (N,)
     per-point text (e.g. event index). `robust` clips the value axis to the [1, 99] percentile so
-    outliers don't skew the view (points still plotted). Returns a plotly Figure."""
+    outliers don't skew the view (points still plotted). Returns a plotly Figure.
+
+    Pass `show_mean=False` for LOCO-style groups that hold a single value each (one point per cohort):
+    a mean line over one point is a redundant tick that reads as a bar and is best suppressed."""
     import plotly.graph_objects as go
     values = np.asarray(values, float); groups = np.asarray(groups)
     order = _group_order(groups, group_order)
@@ -1142,22 +1170,43 @@ def strip_points_fig(values, groups, group_order=None, colors=None, jitter=0.09,
 
 def violin_points_fig(values, groups, group_order=None, colors=None, points="all",
                       show_box=True, title="", xlabel="", ylabel="value", height=450,
-                      robust=True):
-    """Violin (kernel-density silhouette) per group with the raw points overlaid and a mean line —
-    shows the full shape of each distribution AND every observation. `robust` clips the value axis
-    to the [1, 99] percentile (outliers still plotted). Args as `strip_points_fig`."""
+                      robust=True, seed=0):
+    """Violin (kernel-density silhouette) per group with the raw points overlaid ON TOP and a mean
+    line — shows the full shape of each distribution AND every observation. `robust` clips the value
+    axis to the [1, 99] percentile (outliers still plotted). Args as `strip_points_fig`.
+
+    CAVEAT — pick the right chart. A violin is only honest when n is large (>~50 per group) AND the
+    distributions differ in SHAPE. For small n, a small mean shift, or heavy tails the kernel density
+    invents structure (spurious bimodality, mass past impossible values) and the effect hides inside
+    the silhouette — prefer ``ecdf_fig`` (tail comparison), ``strip_points_fig`` (every point, small
+    n) or ``dumbbell_fig`` (paired data) instead.
+
+    The raw points are drawn as a SEPARATE jittered scatter beside each half-violin (not inside the
+    translucent fill) with a white outline and a darkened marker, so they read clearly on top of the
+    0.2-opacity silhouette rather than vanishing under it."""
     import plotly.graph_objects as go
     values = np.asarray(values, float); groups = np.asarray(groups)
     order = _group_order(groups, group_order)
     cmap = _group_colors(order, colors)
+    rng = np.random.RandomState(seed)
     fig = go.Figure()
-    for g in order:
+    for i, g in enumerate(order):
         yv = values[groups == g]; yv = yv[np.isfinite(yv)]
+        # faint half-violin + box, no points inside it (points go on their own trace on top)
         fig.add_trace(go.Violin(y=yv, name=str(g), line_color=cmap[g], fillcolor=cmap[g],
-                                opacity=0.45, points=points, pointpos=0, jitter=0.35,
+                                opacity=0.2, points=False, side="positive", width=0.9,
                                 box_visible=show_box, meanline_visible=True,
-                                marker=dict(size=5, opacity=0.6)))
-    fig.update_yaxes(title=ylabel); fig.update_xaxes(title=xlabel)
+                                x=np.full(len(yv), i, float)))
+        if points and len(yv):
+            jx = -0.18 + (rng.rand(len(yv)) - 0.5) * 0.14      # jittered, beside the violin
+            fig.add_scatter(x=np.full(len(yv), i, float) + jx, y=yv, mode="markers",
+                            name=str(g), legendgroup=str(g), showlegend=False,
+                            marker=dict(size=5, color=_darken(cmap[g]), opacity=0.85,
+                                        line=dict(width=0.8, color="white")),
+                            hovertemplate=f"{g}: %{{y:.3f}}<extra></extra>")
+    fig.update_yaxes(title=ylabel)
+    fig.update_xaxes(title=xlabel, tickmode="array", tickvals=list(range(len(order))),
+                     ticktext=[str(g) for g in order], range=[-0.6, len(order) - 0.4])
     if robust:
         ry = _robust_range(values)
         if ry:
@@ -1288,10 +1337,13 @@ def scatter_points_fig(x, y, groups=None, group_order=None, colors=None, point_s
 
 
 def ecdf_fig(values, groups=None, group_order=None, colors=None, title="",
-             xlabel="value", ylabel="cumulative fraction", height=430):
+             xlabel="value", ylabel="cumulative fraction", height=430, robust=True):
     """Empirical cumulative distribution function, one step curve per group: F(v) = fraction of the
     group at or below v. A crisp way to compare whole distributions (stochastic dominance) without
-    binning. `groups=None` plots a single curve. Returns a plotly Figure."""
+    binning. `groups=None` plots a single curve. `robust` (default True) clips the x-axis to the
+    [1, 99] percentile of the POOLED finite values so a heavy tail doesn't waste most of the panel on
+    empty whitespace (the full curves are still drawn; only the default view is trimmed). Returns a
+    plotly Figure."""
     import plotly.graph_objects as go
     values = np.asarray(values, float)
     groups = np.zeros(len(values), int) if groups is None else np.asarray(groups)
@@ -1306,6 +1358,10 @@ def ecdf_fig(values, groups=None, group_order=None, colors=None, title="",
         fig.add_scatter(x=yv, y=cy, mode="lines", name=str(g),
                         line=dict(color=cmap[g], width=2, shape="hv"))
     fig.update_xaxes(title=xlabel); fig.update_yaxes(title=ylabel, range=[0, 1.02])
+    if robust:
+        rx = _robust_range(values)
+        if rx:
+            fig.update_xaxes(range=rx)
     fig.update_layout(template="plotly_white", height=height, title=title,
                       margin=dict(l=10, r=10, t=50, b=10), showlegend=len(order) > 1)
     return fig
@@ -1450,3 +1506,525 @@ def umap_objective_layout_fig(toy, snapshot=-1, title=None, height=460):
                       margin=dict(l=10, r=10, t=50, b=10))
     fig.update_xaxes(showticklabels=False); fig.update_yaxes(showticklabels=False)
     return fig
+
+
+# ============================================================================ house-style + robust helpers
+def robust_range(x, lo=1.0, hi=99.0, pad=0.05):
+    """PUBLIC robust axis range: [low, high] clipped to the [lo, hi] percentiles of x (default 1/99)
+    with a little padding, so a few extreme outliers don't flatten the rest of the cloud. Returns
+    None when x has too few finite values or a degenerate spread (caller then leaves the axis auto).
+
+    Thin wrapper of the internal `_robust_range` the built-in fig helpers already use, exposed so a
+    notebook author can clip an inline go.Figure the SAME way:
+        r = cu.robust_range(vals)
+        if r: fig.update_xaxes(range=r)"""
+    return _robust_range(x, lo=lo, hi=hi, pad=pad)
+
+
+def apply_house_style(fig, title=None, legend="inside", spatial=False, height=None):
+    """The single house-style fixer to apply to any hand-built inline go.Figure so the whole course
+    looks like one deck and the systemic legend/title/grid defects (brief 1d) are fixed in ONE place.
+
+    Args:
+        fig      a plotly Figure (returned, mutated in place).
+        title    optional overall title string (set only if given).
+        legend   'inside' (default) keeps plotly's default legend but, when a `title` is present,
+                 raises the top margin to ~70 so a top-anchored legend can NEVER overlap the title;
+                 'below' moves the legend under the plot (horizontal, y=-0.2) and raises the bottom
+                 margin; None hides the legend entirely.
+        spatial  True for pixel / skeleton / map / raster views: turns BOTH axes' gridlines off and
+                 locks equal aspect (y scaleanchor=x, scaleratio=1) so shapes aren't distorted.
+        height   optional pixel height.
+
+    Resolves the legend-over-title collision and grid-on-spatial defects everywhere at once."""
+    fig.update_layout(template="plotly_white")
+    m = dict(l=10, r=10, t=50, b=10)
+    if legend == "below":
+        fig.update_layout(showlegend=True,
+                          legend=dict(orientation="h", yanchor="top", y=-0.2,
+                                      xanchor="center", x=0.5))
+        m["b"] = 70
+    elif legend is None:
+        fig.update_layout(showlegend=False)
+    else:                                    # "inside" (default)
+        if title is not None:
+            m["t"] = 70
+    if title is not None:
+        fig.update_layout(title=title)
+    if spatial:
+        fig.update_xaxes(showgrid=False, zeroline=False)
+        fig.update_yaxes(showgrid=False, zeroline=False, scaleanchor="x", scaleratio=1)
+    fig.update_layout(margin=m)
+    if height is not None:
+        fig.update_layout(height=height)
+    return fig
+
+
+def fmt_p(p):
+    """Format a p-value robustly in float64 so a tiny value never underflows to '0.0e+00' (the
+    float32 bug). Returns the bare number string (no 'p = ' prefix):
+        >= 1e-300  -> '1.6e-34' style for small, '0.032' style for ordinary
+        underflow   -> '< 1e-300'
+        non-finite  -> 'nan'."""
+    p = float(np.float64(p))
+    if not np.isfinite(p):
+        return "nan"
+    if p <= 0.0 or p < 1e-300:
+        return "< 1e-300"
+    if p < 1e-3:
+        return f"{p:.1e}"
+    return f"{p:.3g}"
+
+
+# ============================================================================ paired / before-after displays
+def dumbbell_fig(before, after, labels=None, before_name="before", after_name="after",
+                 color_by_direction=True, colors=None, title="", xlabel="value",
+                 height=None, sort_by="after"):
+    """Paired before/after per item: a dot at each end joined by a line, one horizontal row per item.
+    The line/markers are GREEN when the value increases (after > before) and RED when it decreases —
+    the honest display for PAIRED data (cages pre->dep, raw->corrected motion index) that ``box_points``
+    would throw the pairing away on.
+
+    Args:
+        before, after         (N,) arrays, aligned per item.
+        labels                (N,) row labels (default '0'..'N-1').
+        before_name/after_name legend labels for the two endpoints.
+        color_by_direction    True -> green up / red down; False -> a single neutral gray line.
+        colors                optional (N,) per-item line colors (e.g. rank hex); OVERRIDES direction.
+        sort_by               'after' | 'before' | 'delta' | None — row ordering (bottom-to-top).
+    Returns a plotly Figure."""
+    import plotly.graph_objects as go
+    before = np.asarray(before, float); after = np.asarray(after, float)
+    n = len(before)
+    labels = [str(l) for l in labels] if labels is not None else [str(i) for i in range(n)]
+    idx = np.arange(n)
+    if sort_by == "after":
+        idx = np.argsort(after)
+    elif sort_by == "before":
+        idx = np.argsort(before)
+    elif sort_by == "delta":
+        idx = np.argsort(after - before)
+    up, down = "#2ca02c", "#d62728"
+    fig = go.Figure()
+    for row, i in enumerate(idx):
+        if colors is not None:
+            lc = colors[i]
+        elif color_by_direction:
+            lc = up if after[i] >= before[i] else down
+        else:
+            lc = "#888888"
+        fig.add_scatter(x=[before[i], after[i]], y=[row, row], mode="lines",
+                        line=dict(color=lc, width=2.5), showlegend=False, hoverinfo="skip")
+    fig.add_scatter(x=before[idx], y=list(range(n)), mode="markers", name=before_name,
+                    marker=dict(size=9, color="#9aa0a6", line=dict(width=1, color="white")),
+                    hovertemplate=f"{before_name}: %{{x:.3f}}<extra></extra>")
+    fig.add_scatter(x=after[idx], y=list(range(n)), mode="markers", name=after_name,
+                    marker=dict(size=9, color="#1f77b4", line=dict(width=1, color="white")),
+                    hovertemplate=f"{after_name}: %{{x:.3f}}<extra></extra>")
+    fig.update_yaxes(tickmode="array", tickvals=list(range(n)),
+                     ticktext=[labels[i] for i in idx], showgrid=False)
+    fig.update_xaxes(title=xlabel)
+    fig.update_layout(template="plotly_white", title=title,
+                      height=height or max(320, 26 * n + 90),
+                      margin=dict(l=10, r=10, t=50, b=10),
+                      legend=dict(orientation="h", yanchor="top", y=-0.12, x=0.5, xanchor="center"))
+    return fig
+
+
+def slopegraph_fig(values_by_stage, stage_names, labels=None, colors=None, title="",
+                   ylabel="value", height=430, robust=True):
+    """One connected line per item across S >= 2 ordered stages (e.g. raw | rigid | pw-rigid): the
+    paired-across-stages display for the multi-stage motion-correction comparison.
+
+    Args:
+        values_by_stage  (N, S) array — row = item, column = stage.
+        stage_names      length-S labels for the x positions.
+        labels           (N,) per-item hover labels.
+        colors           optional (N,) per-item line colors; default a single translucent color so
+                         the COLLECTIVE drift across stages is what reads.
+        robust           clip the y-axis to the pooled 1/99 percentile.
+    Returns a plotly Figure."""
+    import plotly.graph_objects as go
+    V = np.asarray(values_by_stage, float)
+    n, S = V.shape
+    labels = [str(l) for l in labels] if labels is not None else [str(i) for i in range(n)]
+    xs = list(range(S))
+    fig = go.Figure()
+    for i in range(n):
+        lc = colors[i] if colors is not None else "rgba(76,120,168,0.35)"
+        fig.add_scatter(x=xs, y=V[i], mode="lines+markers", name=labels[i], showlegend=False,
+                        line=dict(color=lc, width=1.5), marker=dict(size=5, color=lc),
+                        hovertemplate=f"{labels[i]}<br>%{{x}}: %{{y:.3f}}<extra></extra>")
+    fig.update_xaxes(tickmode="array", tickvals=xs, ticktext=list(stage_names),
+                     range=[-0.3, S - 0.7], showgrid=False)
+    fig.update_yaxes(title=ylabel)
+    if robust:
+        ry = _robust_range(V.ravel())
+        if ry:
+            fig.update_yaxes(range=ry)
+    fig.update_layout(template="plotly_white", height=height, title=title,
+                      margin=dict(l=10, r=10, t=50, b=10))
+    return fig
+
+
+def paired_diff_fig(diffs, title="", test="wilcoxon", kind="hist", xlabel="difference",
+                    height=430, nbins=40):
+    """Distribution of per-pair differences with a 0 reference line and the paired-test statistic +
+    p annotated — the honest one-number-per-pair view of a before/after change.
+
+    Args:
+        diffs   (N,) per-pair differences (e.g. after - before).
+        test    'wilcoxon' (signed-rank on the diffs vs 0) or None to skip the annotation.
+        kind    'hist' (default) or 'ecdf'.
+    The p-value is computed in float64 and formatted with ``fmt_p`` so a tiny p never prints 0.
+    Returns a plotly Figure."""
+    import plotly.graph_objects as go
+    d = np.asarray(diffs, float); d = d[np.isfinite(d)]
+    if kind == "ecdf":
+        fig = ecdf_fig(d, title="", xlabel=xlabel, ylabel="cumulative fraction", height=height)
+    else:
+        fig = go.Figure(go.Histogram(x=d, nbinsx=nbins, marker=dict(color="#4c78a8")))
+        fig.update_xaxes(title=xlabel); fig.update_yaxes(title="count")
+        fig.update_layout(template="plotly_white", height=height,
+                          margin=dict(l=10, r=10, t=50, b=10))
+    fig.add_vline(x=0.0, line=dict(color="#d62728", width=2, dash="dash"))
+    ann = None
+    if test == "wilcoxon" and len(d) >= 1 and np.any(d != 0):
+        from scipy.stats import wilcoxon
+        try:
+            stat, p = wilcoxon(d)
+            ann = f"Wilcoxon W = {float(stat):.1f}<br>p = {fmt_p(p)}  (n = {len(d)})"
+        except ValueError:
+            ann = None
+    if ann:
+        fig.add_annotation(xref="paper", yref="paper", x=0.98, y=0.98, xanchor="right",
+                           yanchor="top", showarrow=False, text=ann, align="left",
+                           font=dict(size=13), bgcolor="rgba(255,255,255,0.75)",
+                           bordercolor="#ccc", borderwidth=1)
+    fig.update_layout(title=title)
+    return fig
+
+
+# ============================================================================ proportions with CIs
+def wilson_ci(k, n, z=1.96):
+    """Wilson score confidence interval for a binomial proportion k/n. Returns (lo, hi). Handles
+    n == 0 (returns (0.0, 1.0)) and is far better than the normal approximation for small n or rates
+    near 0/1 (it never spills below 0 or above 1). Vectorized: k, n may be scalars or arrays."""
+    k = np.asarray(k, float); n = np.asarray(n, float)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        phat = np.where(n > 0, k / n, 0.5)
+        denom = 1.0 + z * z / n
+        center = (phat + z * z / (2 * n)) / denom
+        half = (z / denom) * np.sqrt(phat * (1 - phat) / n + z * z / (4 * n * n))
+        lo = center - half; hi = center + half
+    lo = np.where(n > 0, np.clip(lo, 0.0, 1.0), 0.0)
+    hi = np.where(n > 0, np.clip(hi, 0.0, 1.0), 1.0)
+    if np.ndim(k) == 0 and np.ndim(n) == 0:
+        return float(lo), float(hi)
+    return lo, hi
+
+
+def proportion_ci_fig(counts, totals, labels, colors=None, group_order=None, z=1.96,
+                      title="", ylabel="rate", xlabel="", height=430):
+    """A point per group at its rate counts/totals with Wilson error bars — the honest replacement
+    for the tautological 'split by X, then plot X' pattern: plot the OUTCOME rate (e.g. aggression
+    rate) per group with a CI that shows how (un)certain each rate is given its n.
+
+    Args:
+        counts, totals  (G,) successes and trials per group.
+        labels          (G,) group labels.
+        colors          optional dict/list mapping group -> color (rank auto-detect otherwise).
+    Returns a plotly Figure."""
+    import plotly.graph_objects as go
+    counts = np.asarray(counts, float); totals = np.asarray(totals, float)
+    labels = [str(l) for l in labels]
+    order = _group_order(labels, group_order)
+    cmap = _group_colors(order, colors if isinstance(colors, dict) else None)
+    if isinstance(colors, (list, tuple, np.ndarray)):
+        cmap = {labels[i]: colors[i] for i in range(len(labels))}
+    with np.errstate(divide="ignore", invalid="ignore"):
+        rate = np.where(totals > 0, counts / totals, np.nan)
+    lo, hi = wilson_ci(counts, totals, z)
+    pos = {g: i for i, g in enumerate(order)}
+    fig = go.Figure()
+    for i, g in enumerate(labels):
+        xi = pos[g]
+        fig.add_scatter(x=[xi], y=[rate[i]], mode="markers", name=g, showlegend=False,
+                        marker=dict(size=12, color=cmap.get(g, "#4c78a8"),
+                                    line=dict(width=1, color="white")),
+                        error_y=dict(type="data", symmetric=False,
+                                     array=[hi[i] - rate[i]], arrayminus=[rate[i] - lo[i]],
+                                     color=cmap.get(g, "#4c78a8"), thickness=2, width=6),
+                        hovertemplate=(f"{g}: %{{y:.3f}}"
+                                       f"<br>[{lo[i]:.3f}, {hi[i]:.3f}]  "
+                                       f"n={int(totals[i])}<extra></extra>"))
+    fig.update_xaxes(tickmode="array", tickvals=list(range(len(order))),
+                     ticktext=order, title=xlabel, range=[-0.5, len(order) - 0.5])
+    fig.update_yaxes(title=ylabel)
+    fig.update_layout(template="plotly_white", height=height, title=title,
+                      margin=dict(l=10, r=10, t=50, b=10))
+    return fig
+
+
+# ============================================================================ leave-one-PC-out AUROC
+def _logreg_pipeline():
+    from sklearn.pipeline import Pipeline
+    from sklearn.preprocessing import StandardScaler
+    from sklearn.impute import SimpleImputer
+    from sklearn.linear_model import LogisticRegression
+    return Pipeline([("impute", SimpleImputer(strategy="median")),
+                     ("scale", StandardScaler()),
+                     ("lr", LogisticRegression(max_iter=1000))])
+
+
+def loo_pc_auroc(scores, y, n_splits=5, seed=0):
+    """Leave-one-PC-out cross-validated AUROC: how much each principal component contributes to
+    predicting the binary label y. Returns a dict:
+        {0: auroc_without_PC1, 1: auroc_without_PC2, ..., 'full': auroc_with_all_PCs}
+    (keys are 0-indexed column indices; 'full' uses every column). A logistic decoder is scored with
+    stratified k-fold cross-val (honest, not in-sample). A LOWER auroc_without_i => PC i mattered
+    more. This is the real replacement for the inert 'drop a PC and re-scatter' cell — dropping a PC
+    that carries signal visibly moves the number."""
+    from sklearn.model_selection import cross_val_predict, StratifiedKFold
+    from sklearn.metrics import roc_auc_score
+    S = np.asarray(scores, float); y = np.asarray(y).astype(int)
+    k = S.shape[1]
+    cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=seed)
+
+    def _auroc(X):
+        proba = cross_val_predict(_logreg_pipeline(), X, y, cv=cv, method="predict_proba")[:, 1]
+        return float(roc_auc_score(y, proba))
+
+    out = {"full": _auroc(S)}
+    for i in range(k):
+        out[i] = _auroc(np.delete(S, i, axis=1))
+    return out
+
+
+def loo_pc_auroc_fig(scores, y, n_splits=5, seed=0, title="Leave-one-PC-out AUROC", height=430):
+    """Bar chart of ``loo_pc_auroc``: one bar per PC = the cross-validated AUROC with that PC removed,
+    with a dashed reference line at the full-model AUROC. Bars that dip BELOW the line are the PCs
+    that carry aggression signal; bars at/above the line are redundant. Returns a plotly Figure."""
+    import plotly.graph_objects as go
+    res = loo_pc_auroc(scores, y, n_splits=n_splits, seed=seed)
+    full = res["full"]
+    ks = sorted(i for i in res if i != "full")
+    vals = [res[i] for i in ks]
+    drop = [full - v for v in vals]
+    cols = ["#d62728" if d > 0 else "#4c78a8" for d in drop]     # red = removing it hurt
+    fig = go.Figure(go.Bar(x=[f"PC{i + 1}" for i in ks], y=vals, marker=dict(color=cols),
+                           hovertemplate="%{x} removed<br>AUROC=%{y:.3f}<extra></extra>"))
+    fig.add_hline(y=full, line=dict(color="#333", width=2, dash="dash"),
+                  annotation_text=f"all PCs = {full:.3f}", annotation_position="top left")
+    fig.update_yaxes(title="AUROC (that PC removed)")
+    fig.update_layout(template="plotly_white", height=height, title=title,
+                      margin=dict(l=10, r=10, t=60, b=10))
+    return fig
+
+
+# ============================================================================ blocked / leaky cross-validation
+def blocked_cv_auroc(X, y, order=None, scheme="blocked", n_splits=5, clf=None):
+    """Per-fold decoder AUROC under one of three cross-validation schemes — the core of the
+    CV-leakage lesson. Temporally autocorrelated samples (neighboring calcium frames) make a random
+    split LEAK, inflating AUROC; a time-respecting split gives the honest number.
+
+    scheme:
+        'shuffle'     random StratifiedKFold(shuffle=True) — the LEAKY one (neighbors land in both
+                      train and test); reproduces the optimistic ~0.95.
+        'blocked'     n_splits CONTIGUOUS blocks in `order`; each block is the test fold once, the
+                      rest train — keeps temporally-adjacent samples together, so ~0.70-0.82.
+        'contiguous'  a single ordered split (first ~1-1/n_splits train, last block test); returns a
+                      length-1 array — the strictest, forward-in-time test.
+    `order` is the temporal ordering of the rows (default np.arange(N)); rows are ranked by it so any
+    monotonic index works. `clf` defaults to a standardized logistic decoder. Returns an np.ndarray
+    of per-fold AUROC."""
+    from sklearn.model_selection import StratifiedKFold
+    from sklearn.metrics import roc_auc_score
+    from sklearn.base import clone
+    X = np.asarray(X, float); y = np.asarray(y).astype(int)
+    n = len(y)
+    order = np.arange(n) if order is None else np.asarray(order)
+    time_rank = np.argsort(np.argsort(order))          # 0..n-1 position in time
+    base = clf if clf is not None else _logreg_pipeline()
+
+    def _fit_score(tr, te):
+        if len(set(y[tr].tolist())) < 2 or len(set(y[te].tolist())) < 2:
+            return np.nan
+        m = clone(base).fit(X[tr], y[tr])
+        proba = m.predict_proba(X[te])[:, 1]
+        return float(roc_auc_score(y[te], proba))
+
+    if scheme == "shuffle":
+        cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=0)
+        return np.array([_fit_score(tr, te) for tr, te in cv.split(X, y)])
+    order_idx = np.argsort(time_rank)                  # row indices sorted by time
+    if scheme == "contiguous":
+        cut = int(n * (1.0 - 1.0 / n_splits))
+        tr, te = order_idx[:cut], order_idx[cut:]
+        return np.array([_fit_score(tr, te)])
+    # blocked: contiguous test blocks along the time order
+    blocks = np.array_split(order_idx, n_splits)
+    out = []
+    for b in blocks:
+        te = b
+        tr = np.setdiff1d(order_idx, te, assume_unique=False)
+        out.append(_fit_score(tr, te))
+    return np.array(out)
+
+
+# ============================================================================ confusion matrix
+def confusion_fig(cm, labels, normalize="row", title="Confusion matrix", height=430):
+    """Heatmap of a confusion matrix. `normalize='row'` (default) divides each row by its sum so the
+    COLOR encodes recall (correct-vs-error within each true class), NOT raw magnitude — essential
+    under class imbalance, where a raw-count colorscale just paints the majority class. 'col'
+    normalizes by predicted class (precision); None shows raw counts. Cells are annotated with the
+    (normalized) value; the raw count rides along in the hover. Returns a plotly Figure."""
+    import plotly.graph_objects as go
+    cm = np.asarray(cm, float)
+    if normalize == "row":
+        denom = cm.sum(1, keepdims=True); Z = np.divide(cm, denom, out=np.zeros_like(cm), where=denom > 0)
+        cbar = "recall (row-normalized)"
+    elif normalize == "col":
+        denom = cm.sum(0, keepdims=True); Z = np.divide(cm, denom, out=np.zeros_like(cm), where=denom > 0)
+        cbar = "precision (col-normalized)"
+    else:
+        Z = cm; cbar = "count"
+    labels = [str(l) for l in labels]
+    text = [[(f"{Z[i, j]:.2f}" if normalize else f"{int(cm[i, j])}") for j in range(cm.shape[1])]
+            for i in range(cm.shape[0])]
+    fig = go.Figure(go.Heatmap(
+        z=Z, x=labels, y=labels, colorscale="Blues",
+        zmin=0, zmax=(1 if normalize else None), colorbar=dict(title=cbar),
+        text=text, texttemplate="%{text}",
+        customdata=cm, hovertemplate="true=%{y} pred=%{x}<br>count=%{customdata}<extra></extra>"))
+    fig.update_xaxes(title="predicted", side="bottom")
+    fig.update_yaxes(title="true", autorange="reversed")
+    fig.update_layout(template="plotly_white", height=height, title=title,
+                      margin=dict(l=10, r=10, t=50, b=10))
+    return fig
+
+
+# ============================================================================ scatter + marginal histograms
+def scatter_marginal_fig(x, y, groups=None, group_order=None, colors=None, robust=True,
+                         point_size=6, opacity=0.8, hover=None, nbins=40,
+                         title="", xlabel="x", ylabel="y", height=560):
+    """A scatter with marginal histograms on the top and right — opaque points, no smoothing. The
+    honest replacement for a 2-D KDE when n is small or the tails are heavy (a KDE over-smooths and
+    can spill probability mass to impossible values). `robust` clips both scatter axes to the pooled
+    1/99 percentile (points still plotted). Optionally colored by `groups`. Returns a plotly Figure."""
+    from plotly.subplots import make_subplots
+    import plotly.graph_objects as go
+    x = np.asarray(x, float); y = np.asarray(y, float)
+    fig = make_subplots(rows=2, cols=2, column_widths=[0.82, 0.18], row_heights=[0.18, 0.82],
+                        horizontal_spacing=0.02, vertical_spacing=0.02,
+                        shared_xaxes=True, shared_yaxes=True)
+    if groups is None:
+        grp = np.zeros(len(x), int); order = [0]; cmap = {0: "#4c78a8"}; single = True
+    else:
+        grp = np.asarray(groups); order = _group_order(grp, group_order)
+        cmap = _group_colors(order, colors); single = False
+    hv = None if hover is None else np.asarray(hover)
+    for g in order:
+        m = grp == g
+        txt = [str(t) for t in hv[m]] if hv is not None else None
+        fig.add_trace(go.Scattergl(
+            x=x[m], y=y[m], mode="markers", name=str(g), showlegend=not single, text=txt,
+            marker=dict(size=point_size, color=cmap[g], opacity=opacity, line=dict(width=0.4, color="white")),
+            hovertemplate=(("%{text}<br>" if txt is not None else "") + "%{x:.3f}, %{y:.3f}<extra></extra>")),
+            row=2, col=1)
+        fig.add_trace(go.Histogram(x=x[m], nbinsx=nbins, marker=dict(color=cmap[g]), opacity=0.6,
+                                   showlegend=False), row=1, col=1)
+        fig.add_trace(go.Histogram(y=y[m], nbinsy=nbins, marker=dict(color=cmap[g]), opacity=0.6,
+                                   showlegend=False), row=2, col=2)
+    fig.update_layout(barmode="overlay")
+    fig.update_xaxes(title=xlabel, row=2, col=1); fig.update_yaxes(title=ylabel, row=2, col=1)
+    if robust:
+        rx = _robust_range(x); ry = _robust_range(y)
+        if rx:
+            fig.update_xaxes(range=rx, row=2, col=1)
+        if ry:
+            fig.update_yaxes(range=ry, row=2, col=1)
+    fig.update_layout(template="plotly_white", height=height, title=title,
+                      margin=dict(l=10, r=10, t=50, b=10))
+    return fig
+
+
+# ============================================================================ time-frequency: dominant frequency
+def dominant_frequency(power, freqs, interior=None):
+    """Per-frame dominant frequency from a (F, T) wavelet-power spectrogram, taking the argmax ONLY
+    over positive frequencies AND over the non-edge-padded INTERIOR time columns — so it does not
+    floor at the lowest frequency because of edge-padding artifacts (the bug that made the NB3
+    detector report ~1 Hz for everything).
+
+    Args:
+        power    (F, T) power (e.g. from ``wavelet_power``).
+        freqs    (F,) frequency axis (Hz).
+        interior  which time columns are trustworthy (not edge-padded). Accepts: None (default ->
+                  central 60%, trimming 20% off each edge), a boolean mask (T,), an index array, a
+                  slice, or a (start, end) fraction/index tuple.
+    Returns a (T,) float array: the dominant frequency at each interior frame and NaN outside the
+    interior. Take ``np.nanmedian`` of it for a single robust scalar."""
+    P = np.asarray(power, float); f = np.asarray(freqs, float)
+    F, T = P.shape
+    fmask = f > 0
+    mask = np.zeros(T, bool)
+    if interior is None:
+        a, b = int(round(0.2 * T)), int(round(0.8 * T))
+        mask[a:max(a + 1, b)] = True
+    elif isinstance(interior, slice):
+        mask[interior] = True
+    elif isinstance(interior, tuple) and len(interior) == 2:
+        a, b = interior
+        if isinstance(a, float) or isinstance(b, float):
+            a, b = int(round(a * T)), int(round(b * T))
+        mask[int(a):int(b)] = True
+    else:
+        interior = np.asarray(interior)
+        if interior.dtype == bool:
+            mask = interior
+        else:
+            mask[interior] = True
+    out = np.full(T, np.nan)
+    fpos = np.where(fmask)[0]
+    if len(fpos) == 0:
+        return out
+    cols = np.where(mask)[0]
+    if len(cols):
+        sub = P[np.ix_(fpos, cols)]                    # (Fpos, ncols)
+        best = fpos[np.argmax(sub, axis=0)]
+        out[cols] = f[best]
+    return out
+
+
+# ============================================================================ grid-cell gridness score
+def gridness_score(autocorr2d):
+    """Standard 60-degree gridness of a 2-D spatial autocorrelogram: how hexagonally symmetric the
+    ring of surrounding peaks is. Correlate the autocorrelogram's central annulus with rotated copies
+    of itself at 30/60/90/120/150 deg and return
+
+        gridness = min(corr@60, corr@120) - max(corr@30, corr@90, corr@150)
+
+    A true grid cell scores > 0 (its ring repeats every 60 deg); a place field or border/multi-field
+    cell scores <= 0. This gives NB8 an HONEST grid call instead of eyeballing 'are there satellites'.
+
+    `autocorr2d` is a square-ish 2-D autocorrelogram (e.g. of a rate map). Returns a float."""
+    from scipy.ndimage import rotate
+    A = np.asarray(autocorr2d, float)
+    A = np.nan_to_num(A, nan=0.0)
+    cy, cx = (np.array(A.shape) - 1) / 2.0
+    yy, xx = np.mgrid[0:A.shape[0], 0:A.shape[1]]
+    r = np.sqrt((yy - cy) ** 2 + (xx - cx) ** 2)
+    r_out = 0.5 * min(A.shape)                          # inscribed radius
+    r_in = 0.15 * r_out                                 # exclude the central peak
+    ring = (r >= r_in) & (r <= r_out)
+    base = A[ring]
+
+    def _corr(angle):
+        Ar = rotate(A, angle, reshape=False, order=1, mode="constant", cval=0.0)
+        v = Ar[ring]
+        if base.std() < 1e-12 or v.std() < 1e-12:
+            return 0.0
+        return float(np.corrcoef(base, v)[0, 1])
+
+    c = {a: _corr(a) for a in (30, 60, 90, 120, 150)}
+    return min(c[60], c[120]) - max(c[30], c[90], c[150])

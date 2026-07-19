@@ -1,6 +1,6 @@
 # Deploying the course as one link
 
-`serve.py` publishes the whole course — a landing page plus all ten lessons in order — from a
+`serve.py` publishes the whole course — a landing page plus all eight lessons in order — from a
 **single URL**, using marimo's ASGI app server. It runs a **real Python kernel** (not
 WebAssembly), so `numba` / `umap-learn` / `hdbscan` work — unlike a GitHub-Pages / WASM export,
 which has no in-browser build for those and would break at the clustering/map lesson (04).
@@ -13,7 +13,7 @@ Each visitor gets their own **isolated kernel session**; they share the machine'
 uv run python serve.py        # -> http://localhost:7860
 ```
 
-Open the URL and click through lessons 1–10.
+Open the URL and click through lessons 1–8.
 
 ## What students see
 
@@ -53,16 +53,14 @@ paste the lesson's URL (use the raw URL if molab asks for the file directly):
 
 - 01 — `https://github.com/talmolab/sleap-social-behavior-lab/blob/main/notebooks/01_pose_and_identity.py`
 - 02 — `.../notebooks/02_body_frame_and_features.py`
-- 03 — `.../notebooks/03_exploring_behavior_in_time.py`
-- 04 — `.../notebooks/04_pca_clustering_and_stats.py`
-- 05 — `.../notebooks/05_dynamics_and_decoding.py`
-- 06 — `.../notebooks/06_motion_correction.py`
-- 07 — `.../notebooks/07_calcium_extraction.py`
-- 08 — `.../notebooks/08_source_extraction.py`
-- 09 — `.../notebooks/09_place_and_grid_cells.py`
-- 10 — `.../notebooks/10_neural_social_decoding.py`
+- 03 — `.../notebooks/03_behavior_in_time.py`
+- 04 — `.../notebooks/04_collapsing_to_a_manifold.py`
+- 05 — `.../notebooks/05_how_analyses_mislead.py`
+- 06 — `.../notebooks/06_dynamics_and_decoding.py`
+- 07 — `.../notebooks/07_from_movie_to_traces.py`
+- 08 — `.../notebooks/08_reading_the_population.py`
 
-Give students the ten molab links in order. First run in each notebook installs the pinned
+Give students the eight molab links in order. First run in each notebook installs the pinned
 packages (from the inline PEP 723 block) and downloads the data — a minute or two — then it's
 cached for that session. Note molab notebooks are public-but-undiscoverable by default.
 

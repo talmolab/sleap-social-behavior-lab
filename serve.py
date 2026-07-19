@@ -27,19 +27,17 @@ os.chdir(_HERE)
 
 _NB = os.path.join(_HERE, "notebooks")
 
-# Landing page at "/", then the ten lessons in order at /01 .. /10
-# (Week 1: behavior 01–05; Week 2: the neural companion 06–10).
+# Landing page at "/", then the eight lessons in order at /01 .. /08
+# (Week 1: behavior 01–06; Week 2: the neural companion 07–08).
 _LESSONS = [
     ("/01", "01_pose_and_identity.py"),
     ("/02", "02_body_frame_and_features.py"),
-    ("/03", "03_exploring_behavior_in_time.py"),
-    ("/04", "04_pca_clustering_and_stats.py"),
-    ("/05", "05_dynamics_and_decoding.py"),
-    ("/06", "06_motion_correction.py"),
-    ("/07", "07_calcium_extraction.py"),
-    ("/08", "08_source_extraction.py"),
-    ("/09", "09_place_and_grid_cells.py"),
-    ("/10", "10_neural_social_decoding.py"),
+    ("/03", "03_behavior_in_time.py"),
+    ("/04", "04_collapsing_to_a_manifold.py"),
+    ("/05", "05_how_analyses_mislead.py"),
+    ("/06", "06_dynamics_and_decoding.py"),
+    ("/07", "07_from_movie_to_traces.py"),
+    ("/08", "08_reading_the_population.py"),
 ]
 
 _builder = marimo.create_asgi_app().with_app(path="", root=os.path.join(_HERE, "home.py"))

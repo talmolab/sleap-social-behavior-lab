@@ -30,6 +30,14 @@ import zipfile
 import urllib.request
 import numpy as np
 
+# The behavior arm's engine. neural_utils runs with course/ on sys.path, so this plain import
+# works in every notebook. We IMPORT the shared figure/stat helpers from here rather than
+# re-implement them, so the neural notebooks inherit the round-3 fixes (violin points-on-top,
+# ecdf robust-clip, RdBu_r loadings, house-style legend/grid, float64 p-values, ...). All of
+# course_utils' heavy deps (plotly/scipy/sklearn) are imported lazily inside function bodies, so
+# `import course_utils` stays as cheap as importing this module.
+import course_utils as cu
+
 
 # ============================================================================ source registry
 # Canonical identifiers for every remote asset, taken verbatim from the 2025 scripts so the neural
@@ -523,44 +531,94 @@ def _apply(fig, title, height):
     return fig
 
 
+def _robust_clim(M, lo=1.0, hi=99.0):
+    """Robust (zmin, zmax) COLOR limits for an image/heatmap: the [lo, hi] percentiles (default
+    1/99) of the finite values of ``M`` — so a few saturated pixels (a burned-in timestamp, one
+    hot bin) don't blow out the color scale and hide the structure. Returns (None, None) when
+    there are too few finite values or the spread is degenerate (caller then leaves color auto)."""
+    v = np.asarray(M, float).ravel()
+    v = v[np.isfinite(v)]
+    if v.size < 3:
+        return None, None
+    a, b = (float(z) for z in np.nanpercentile(v, [lo, hi]))
+    if not (np.isfinite(a) and np.isfinite(b)) or b <= a:
+        return None, None
+    return a, b
+
+
 def heatmap_fig(M, x=None, y=None, title="", xlabel="", ylabel="", colorscale="Viridis",
-                zmid=None, zmin=None, zmax=None, colorbar_title="", height=420):
-    """House-style heatmap of a 2D matrix ``M`` (rows plotted top→bottom as given)."""
+                zmid=None, zmin=None, zmax=None, colorbar_title="", height=420, robust=True):
+    """House-style heatmap of a 2D matrix ``M`` (rows plotted top→bottom as given).
+
+    ``robust`` (default True) clips the COLOR scale to the 1/99 percentile of ``M`` when the caller
+    left ``zmin``/``zmax``/``zmid`` all unset, so a lone extreme cell doesn't wash out the rest.
+    Any explicit ``zmin``/``zmax``/``zmid`` fully disables the auto-clip (backward compatible)."""
     import plotly.graph_objects as go
-    hm = go.Heatmap(z=np.asarray(M), x=x, y=y, colorscale=colorscale, zmid=zmid,
+    M = np.asarray(M)
+    if robust and zmin is None and zmax is None and zmid is None:
+        zmin, zmax = _robust_clim(M)
+    hm = go.Heatmap(z=M, x=x, y=y, colorscale=colorscale, zmid=zmid,
                     zmin=zmin, zmax=zmax, colorbar=dict(title=colorbar_title))
     fig = go.Figure(hm)
-    fig.update_xaxes(title=xlabel)
-    fig.update_yaxes(title=ylabel)
+    fig.update_xaxes(title=xlabel, showgrid=False)
+    fig.update_yaxes(title=ylabel, showgrid=False)
     return _apply(fig, title, height)
 
 
 def image_fig(img, title="", colorscale="gray", zmin=None, zmax=None, colorbar_title="",
-              equal_aspect=True, height=460):
+              equal_aspect=True, height=460, robust=True):
     """Display a 2D image (grayscale frame, correlation image, footprint) with image y-orientation
-    (row 0 at top) and, by default, an equal-aspect (square-pixel) axis."""
+    (row 0 at top) and, by default, an equal-aspect (square-pixel) axis.
+
+    ``robust`` (default True) clips the COLOR scale to the 1/99 percentile when ``zmin``/``zmax``
+    are unset — the fix for max-/mean-projections where a burned-in timestamp or letterbox band
+    saturates the scale and the cells vanish. Grid is off (spatial view)."""
     import plotly.graph_objects as go
     img = np.asarray(img)
+    if robust and zmin is None and zmax is None:
+        zmin, zmax = _robust_clim(img)
     fig = go.Figure(go.Heatmap(z=img, colorscale=colorscale, zmin=zmin, zmax=zmax,
                                colorbar=dict(title=colorbar_title)))
     fig.update_yaxes(autorange="reversed")
     if equal_aspect:
         fig.update_yaxes(scaleanchor="x", scaleratio=1)
-    fig.update_xaxes(visible=False)
-    fig.update_yaxes(visible=False)
+    fig.update_xaxes(visible=False, showgrid=False)
+    fig.update_yaxes(visible=False, showgrid=False)
     return _apply(fig, title, height)
 
 
-def raster_fig(neurons, title="", xlabel="Time (frames)", ylabel="Neuron", colorscale="Viridis",
-               zmid=None, zmin=None, zmax=None, colorbar_title="", height=440):
-    """Population raster: a ``(n_neurons, T)`` matrix as a heatmap (one row per neuron)."""
-    return heatmap_fig(neurons, title=title, xlabel=xlabel, ylabel=ylabel, colorscale=colorscale,
-                       zmid=zmid, zmin=zmin, zmax=zmax, colorbar_title=colorbar_title, height=height)
+def raster_fig(neurons, x=None, y=None, title="", xlabel="Time (frames)", ylabel="Neuron",
+               colorscale="Viridis", zmid=None, zmin=None, zmax=None, colorbar_title="",
+               height=440, robust=True, zmax_floor=3.0):
+    """Population raster: a ``(n_neurons, T)`` matrix as a heatmap (one row per neuron).
+
+    Pass ``x`` (length T) to set explicit column coordinates — e.g. real frame indices after the
+    time axis has been down-sampled for display — so overlays drawn in those units line up.
+
+    ``robust`` (default True) sets the color scale from the 1/99 percentile of the data BUT keeps
+    ``zmax`` at or above ``zmax_floor`` (default 3, roughly a z-scored "event" level): without the
+    floor a quiet session's p99 sits in the noise (~1) and the whole raster saturates; with a lone
+    hot bin the p99 keeps that bin from blanking every other row. Explicit ``zmin``/``zmax`` win."""
+    z = np.asarray(neurons)
+    if robust:
+        lo, hi = _robust_clim(z, 1.0, 99.0)
+        if zmin is None and lo is not None:
+            zmin = lo
+        if zmax is None and hi is not None:
+            zmax = max(hi, float(zmax_floor))
+    return heatmap_fig(z, x=x, y=y, title=title, xlabel=xlabel, ylabel=ylabel,
+                       colorscale=colorscale, zmid=zmid, zmin=zmin, zmax=zmax,
+                       colorbar_title=colorbar_title, height=height, robust=False)
 
 
-def trace_fig(t, y, title="", xlabel="Time", ylabel="", names=None, height=280):
+def trace_fig(t, y, title="", xlabel="Time", ylabel="", names=None, height=280, robust=True):
     """Line plot of one or several 1D traces. ``y`` may be ``(T,)`` or ``(T, k)``/list-of-traces;
-    ``t`` is the shared x (or None -> sample index)."""
+    ``t`` is the shared x (or None -> sample index).
+
+    ``robust`` (default True) pins the y-axis to the 1/99 percentile of all the plotted values so a
+    single spike can't auto-rescale the view and flatten the informative band (e.g. hiding the 6×
+    cell/background gap in the NB7 ROI traces). Full traces are still drawn — only the default view
+    is clipped; pass ``robust=False`` to auto-range."""
     import plotly.graph_objects as go
     y = np.asarray(y)
     if y.ndim == 1:
@@ -574,289 +632,193 @@ def trace_fig(t, y, title="", xlabel="Time", ylabel="", names=None, height=280):
                         showlegend=names is not None)
     fig.update_xaxes(title=xlabel)
     fig.update_yaxes(title=ylabel)
+    if robust:
+        ry = cu.robust_range(y)
+        if ry:
+            fig.update_yaxes(range=ry)
     return _apply(fig, title, height)
 
 
 def overlay_fig(traj, pts, title="", traj_name="path", pts_name="spikes", pts_color="#e45756",
-                traj_color="#4c78a8", height=560, equal_aspect=True, reverse_y=False):
+                traj_color="#4c78a8", height=560, equal_aspect=True, reverse_y=False, robust=True):
     """Trajectory + event-location overlay (NB12 spike-position plots): draw the animal's path
     ``traj`` ``(T, 2)`` as a line and overlay ``pts`` ``(K, 2)`` (e.g. positions at spike frames)
-    as markers. Set ``reverse_y=True`` for image-style coordinates."""
+    as markers. Set ``reverse_y=True`` for image-style coordinates.
+
+    ``robust`` (default True) clips both axes to the 1/99 percentile of the pooled trajectory+event
+    coordinates so a stray tracking jump doesn't shrink the arena into a corner. Grid off (spatial);
+    legend below the plot so it never collides with the title."""
     import plotly.graph_objects as go
     traj = np.asarray(traj, dtype=float)
     fig = go.Figure()
     fig.add_scatter(x=traj[:, 0], y=traj[:, 1], mode="lines",
                     line=dict(color=traj_color, width=1), name=traj_name, opacity=0.6)
+    xs = [traj[:, 0]]
+    ys = [traj[:, 1]]
     if pts is not None and len(pts):
         pts = np.asarray(pts, dtype=float)
         fig.add_scatter(x=pts[:, 0], y=pts[:, 1], mode="markers",
                         marker=dict(color=pts_color, size=5), name=pts_name)
-    if equal_aspect:
-        fig.update_yaxes(scaleanchor="x", scaleratio=1)
-    if reverse_y:
-        fig.update_yaxes(autorange="reversed")
-    return _apply(fig, title, height)
-
-
-def kymograph_fig(kymo, title="", xlabel="Position (px)", ylabel="Time (frames)",
-                  colorscale="gray", height=460):
-    """Kymograph: a ``(T, W)`` slice (one image row sampled over time) as a heatmap with time on the
-    y-axis (NB09 motion-correction jitter view). Straight vertical streaks = stable; wiggles =
-    residual motion."""
-    import plotly.graph_objects as go
-    fig = go.Figure(go.Heatmap(z=np.asarray(kymo), colorscale=colorscale, showscale=False))
-    fig.update_yaxes(autorange="reversed", title=ylabel)
-    fig.update_xaxes(title=xlabel)
-    return _apply(fig, title, height)
-
-
-# ============================================================================ seaborn-style interactive plotly
-# Round-3 directive 5, mirrored from course_utils for the neural notebooks: every distribution
-# comparison shows the RAW individual points, interactively, in the house style — no bare bar charts.
-# Generic (no rank coloring): a neutral qualitative palette; pass `colors` to override per group.
-_QUAL_PALETTE = ["#4c78a8", "#f58518", "#54a24b", "#e45756", "#72b7b2",
-                 "#eeca3b", "#b279a2", "#ff9da6", "#9d755d", "#bab0ac"]
-
-
-def _group_colors(order, colors=None):
-    """Map each group label -> hex color: explicit `colors` dict (keyed by label or its str) wins,
-    else a cycled qualitative palette."""
-    out = {}
-    for i, g in enumerate(order):
-        if colors and g in colors:
-            out[g] = colors[g]
-        elif colors and str(g) in colors:
-            out[g] = colors[str(g)]
-        else:
-            out[g] = _QUAL_PALETTE[i % len(_QUAL_PALETTE)]
-    return out
-
-
-def _group_order(groups, group_order=None):
-    return list(group_order) if group_order is not None else list(dict.fromkeys(np.asarray(groups).tolist()))
-
-
-def _robust_range(v, lo=1.0, hi=99.0, pad=0.05):
-    """[low, high] for a VISIBLE axis clipped to the [lo, hi] percentiles of v (default 1/99) with a
-    little padding, so extreme outliers don't flatten the rest of the cloud (points outside are
-    still plotted, just off the default view). Returns None on too-few/degenerate data."""
-    v = np.asarray(v, float); v = v[np.isfinite(v)]
-    if v.size < 3:
-        return None
-    a, b = (float(z) for z in np.nanpercentile(v, [lo, hi]))
-    if not (np.isfinite(a) and np.isfinite(b)) or b <= a:
-        a, b = float(np.nanmin(v)), float(np.nanmax(v))
-        if b <= a:
-            return None
-    span = b - a
-    return [a - span * pad, b + span * pad]
-
-
-def strip_points_fig(values, groups, group_order=None, colors=None, jitter=0.09,
-                     point_size=6, opacity=0.7, show_mean=True, hover=None,
-                     title="", xlabel="", ylabel="value", height=430, seed=0):
-    """Categorical strip plot: every individual data point, jittered horizontally, colored by group,
-    with hover — the honest replacement for a bar-of-means. A short line marks each group mean.
-    `values` (N,) numeric; `groups` (N,) labels; optional `hover` (N,) per-point text."""
-    import plotly.graph_objects as go
-    values = np.asarray(values, float); groups = np.asarray(groups)
-    order = _group_order(groups, group_order)
-    cmap = _group_colors(order, colors)
-    rng = np.random.RandomState(seed)
-    hv = None if hover is None else np.asarray(hover)
-    fig = go.Figure()
-    for i, g in enumerate(order):
-        m = groups == g
-        yv = values[m]; keep = np.isfinite(yv); yv = yv[keep]
-        x = i + (rng.rand(len(yv)) - 0.5) * 2 * jitter
-        txt = [str(t) for t in hv[m][keep]] if hv is not None else None
-        fig.add_scatter(x=x, y=yv, mode="markers", name=str(g),
-                        marker=dict(size=point_size, color=cmap[g], opacity=opacity,
-                                    line=dict(width=0.5, color="white")),
-                        text=txt,
-                        hovertemplate=(("%{text}<br>" if txt is not None else "") +
-                                       f"{g}: %{{y:.3f}}<extra></extra>"))
-        if show_mean and len(yv):
-            mu = float(np.nanmean(yv))
-            fig.add_scatter(x=[i - 0.28, i + 0.28], y=[mu, mu], mode="lines",
-                            line=dict(color=cmap[g], width=3), showlegend=False,
-                            hovertemplate=f"{g} mean: {mu:.3f}<extra></extra>")
-    fig.update_xaxes(tickmode="array", tickvals=list(range(len(order))),
-                     ticktext=[str(g) for g in order], title=xlabel)
-    fig.update_yaxes(title=ylabel)
-    fig.update_layout(template="plotly_white", height=height, title=title,
-                      margin=dict(l=10, r=10, t=50, b=10), showlegend=len(order) > 1)
-    return fig
-
-
-def violin_points_fig(values, groups, group_order=None, colors=None, points="all",
-                      show_box=True, title="", xlabel="", ylabel="value", height=450):
-    """Violin (kernel-density silhouette) per group with the raw points overlaid and a mean line."""
-    import plotly.graph_objects as go
-    values = np.asarray(values, float); groups = np.asarray(groups)
-    order = _group_order(groups, group_order)
-    cmap = _group_colors(order, colors)
-    fig = go.Figure()
-    for g in order:
-        yv = values[groups == g]; yv = yv[np.isfinite(yv)]
-        fig.add_trace(go.Violin(y=yv, name=str(g), line_color=cmap[g], fillcolor=cmap[g],
-                                opacity=0.45, points=points, pointpos=0, jitter=0.35,
-                                box_visible=show_box, meanline_visible=True,
-                                marker=dict(size=5, opacity=0.6)))
-    fig.update_yaxes(title=ylabel); fig.update_xaxes(title=xlabel)
-    fig.update_layout(template="plotly_white", height=height, title=title,
-                      margin=dict(l=10, r=10, t=50, b=10), showlegend=len(order) > 1)
-    return fig
-
-
-def box_points_fig(values, groups, group_order=None, colors=None, title="",
-                   xlabel="", ylabel="value", height=450):
-    """Box-and-whisker per group with ALL points overlaid (jittered)."""
-    import plotly.graph_objects as go
-    values = np.asarray(values, float); groups = np.asarray(groups)
-    order = _group_order(groups, group_order)
-    cmap = _group_colors(order, colors)
-    fig = go.Figure()
-    for g in order:
-        yv = values[groups == g]; yv = yv[np.isfinite(yv)]
-        fig.add_trace(go.Box(y=yv, name=str(g), boxpoints="all", jitter=0.4, pointpos=0,
-                             marker=dict(size=4, color=cmap[g], opacity=0.6),
-                             line=dict(color=cmap[g]), fillcolor="rgba(0,0,0,0)"))
-    fig.update_yaxes(title=ylabel); fig.update_xaxes(title=xlabel)
-    fig.update_layout(template="plotly_white", height=height, title=title,
-                      margin=dict(l=10, r=10, t=50, b=10), showlegend=len(order) > 1)
-    return fig
-
-
-def kde2d_fig(x, y, gridsize=120, colorscale="Viridis", show_points=True, point_color="#333333",
-              hover=None, title="", xlabel="x", ylabel="y", height=480, bw_method=None):
-    """2-D density via scipy.stats.gaussian_kde: a filled contour of where (x, y) pairs concentrate,
-    with the raw points optionally overlaid."""
-    import plotly.graph_objects as go
-    from scipy.stats import gaussian_kde
-    x = np.asarray(x, float); y = np.asarray(y, float)
-    ok = np.isfinite(x) & np.isfinite(y); x, y = x[ok], y[ok]
-    kde = gaussian_kde(np.vstack([x, y]), bw_method=bw_method)
-    xi = np.linspace(x.min(), x.max(), gridsize); yi = np.linspace(y.min(), y.max(), gridsize)
-    XX, YY = np.meshgrid(xi, yi)
-    Z = kde(np.vstack([XX.ravel(), YY.ravel()])).reshape(XX.shape)
-    fig = go.Figure(go.Contour(x=xi, y=yi, z=Z, colorscale=colorscale,
-                               contours=dict(coloring="fill"), colorbar=dict(title="density")))
-    if show_points:
-        txt = None if hover is None else [str(t) for t in np.asarray(hover)[ok]]
-        fig.add_scatter(x=x, y=y, mode="markers",
-                        marker=dict(size=3, color=point_color, opacity=0.35),
-                        text=txt, showlegend=False,
-                        hovertemplate=(("%{text}<br>" if txt is not None else "") +
-                                       "%{x:.2f}, %{y:.2f}<extra></extra>"))
-    fig.update_xaxes(title=xlabel); fig.update_yaxes(title=ylabel)
-    fig.update_layout(template="plotly_white", height=height, title=title,
-                      margin=dict(l=10, r=10, t=50, b=10))
-    return fig
-
-
-def ecdf_fig(values, groups=None, group_order=None, colors=None, title="",
-             xlabel="value", ylabel="cumulative fraction", height=430):
-    """Empirical CDF, one step curve per group: F(v) = fraction of the group at or below v."""
-    import plotly.graph_objects as go
-    values = np.asarray(values, float)
-    groups = np.zeros(len(values), int) if groups is None else np.asarray(groups)
-    order = _group_order(groups, group_order)
-    cmap = _group_colors(order, colors)
-    fig = go.Figure()
-    for g in order:
-        yv = np.sort(values[groups == g][np.isfinite(values[groups == g])])
-        if not len(yv):
-            continue
-        cy = np.arange(1, len(yv) + 1) / len(yv)
-        fig.add_scatter(x=yv, y=cy, mode="lines", name=str(g),
-                        line=dict(color=cmap[g], width=2, shape="hv"))
-    fig.update_xaxes(title=xlabel); fig.update_yaxes(title=ylabel, range=[0, 1.02])
-    fig.update_layout(template="plotly_white", height=height, title=title,
-                      margin=dict(l=10, r=10, t=50, b=10), showlegend=len(order) > 1)
-    return fig
-
-
-def umap_colored_by_feature_fig(emb, feature_values, name="feature", colorscale="Viridis",
-                                point_size=5, opacity=0.85, hover=None, title=None,
-                                height=520, robust=True):
-    """Scatter of a precomputed 2-D embedding (emb (N,2)) colored by one continuous feature — for
-    giving low-D map axes meaning. `feature_values` (N,) numeric; `robust` clips the color scale to
-    the 2nd/98th percentile."""
-    import plotly.graph_objects as go
-    emb = np.asarray(emb, float); v = np.asarray(feature_values, float)
-    cmin = cmax = None
-    if robust and np.isfinite(v).any():
-        cmin, cmax = [float(z) for z in np.nanpercentile(v, [2, 98])]
-    txt = None if hover is None else [str(t) for t in np.asarray(hover)]
-    fig = go.Figure(go.Scattergl(
-        x=emb[:, 0], y=emb[:, 1], mode="markers",
-        marker=dict(size=point_size, color=v, colorscale=colorscale, cmin=cmin, cmax=cmax,
-                    opacity=opacity, colorbar=dict(title=name), line=dict(width=0)),
-        text=txt,
-        hovertemplate=(("%{text}<br>" if txt is not None else "") +
-                       f"{name}=%{{marker.color:.3f}}<extra></extra>")))
-    fig.update_xaxes(title="dim-1", showticklabels=False)
-    fig.update_yaxes(title="dim-2", showticklabels=False)
-    fig.update_layout(template="plotly_white", height=height,
-                      title=title or f"embedding colored by {name}",
-                      margin=dict(l=10, r=10, t=50, b=10))
-    return fig
-
-
-def scatter_points_fig(x, y, groups=None, group_order=None, colors=None, point_size=7,
-                       opacity=0.75, hover=None, annotate_r=True, robust=True, trendline=True,
-                       title="", xlabel="x", ylabel="y", height=460):
-    """Scatter of individual (x, y) points — one dot per observation, with hover — for showing a
-    CORRELATION honestly (NOT a density). Optionally colored by `groups`. `annotate_r` writes the
-    Pearson r (and p, n), computed on all finite pairs, in a corner box; `trendline` adds the
-    least-squares fit; `robust` clips both visible axes to the [1, 99] percentile so a few extremes
-    don't flatten the cloud (outliers still plotted, off the default view). Returns a plotly Figure.
-    Mirrors course_utils.scatter_points_fig for the neural notebooks (e.g. two readout metrics)."""
-    import plotly.graph_objects as go
-    from scipy.stats import pearsonr
-    x = np.asarray(x, float); y = np.asarray(y, float)
-    ok = np.isfinite(x) & np.isfinite(y)
-    fig = go.Figure()
-    if groups is None:
-        txt = None if hover is None else [str(t) for t in np.asarray(hover)]
-        fig.add_scatter(x=x, y=y, mode="markers", showlegend=False, text=txt,
-                        marker=dict(size=point_size, color=_QUAL_PALETTE[0], opacity=opacity,
-                                    line=dict(width=0.5, color="white")),
-                        hovertemplate=(("%{text}<br>" if txt is not None else "") +
-                                       "%{x:.3f}, %{y:.3f}<extra></extra>"))
-    else:
-        grp = np.asarray(groups)
-        order = _group_order(grp, group_order); cmap = _group_colors(order, colors)
-        hv = None if hover is None else np.asarray(hover)
-        for g in order:
-            m = grp == g
-            txt = [str(t) for t in hv[m]] if hv is not None else None
-            fig.add_scatter(x=x[m], y=y[m], mode="markers", name=str(g), text=txt,
-                            marker=dict(size=point_size, color=cmap[g], opacity=opacity,
-                                        line=dict(width=0.5, color="white")),
-                            hovertemplate=(("%{text}<br>" if txt is not None else "") +
-                                           f"{g}: %{{x:.3f}}, %{{y:.3f}}<extra></extra>"))
-    if ok.sum() >= 3:
-        r, p = pearsonr(x[ok], y[ok])
-        if trendline:
-            b1, b0 = np.polyfit(x[ok], y[ok], 1)
-            xr = np.array([float(x[ok].min()), float(x[ok].max())])
-            fig.add_scatter(x=xr, y=b0 + b1 * xr, mode="lines", showlegend=False,
-                            line=dict(color="#555", width=2, dash="dash"), hoverinfo="skip")
-        if annotate_r:
-            fig.add_annotation(xref="paper", yref="paper", x=0.02, y=0.98, xanchor="left",
-                               yanchor="top", showarrow=False,
-                               text=f"r = {r:.3f}<br>p = {p:.2g}  (n = {int(ok.sum())})",
-                               font=dict(size=13), bgcolor="rgba(255,255,255,0.72)",
-                               bordercolor="#ccc", borderwidth=1, align="left")
-    fig.update_xaxes(title=xlabel); fig.update_yaxes(title=ylabel)
+        xs.append(pts[:, 0]); ys.append(pts[:, 1])
     if robust:
-        rx = _robust_range(x); ry = _robust_range(y)
+        rx = cu.robust_range(np.concatenate(xs))
+        ry = cu.robust_range(np.concatenate(ys))
         if rx:
             fig.update_xaxes(range=rx)
         if ry:
             fig.update_yaxes(range=ry)
-    fig.update_layout(template="plotly_white", height=height, title=title,
-                      margin=dict(l=10, r=10, t=50, b=10), showlegend=groups is not None)
+    if equal_aspect:
+        fig.update_yaxes(scaleanchor="x", scaleratio=1)
+    if reverse_y:
+        fig.update_yaxes(autorange="reversed")
+    fig.update_xaxes(showgrid=False, zeroline=False)
+    fig.update_yaxes(showgrid=False, zeroline=False)
+    cu.apply_house_style(fig, title=title or None, legend="below", height=height)
     return fig
+
+
+def kymograph_fig(kymo, title="", xlabel="Position (px)", ylabel="Time (frames)",
+                  colorscale="gray", zmin=None, zmax=None, height=460, robust=True):
+    """Kymograph: a ``(T, W)`` slice (one image row sampled over time) as a heatmap with time on the
+    y-axis (NB09 motion-correction jitter view). Straight vertical streaks = stable; wiggles =
+    residual motion.
+
+    ``robust`` (default True) clips the color scale to the 1/99 percentile when ``zmin``/``zmax``
+    are unset, so a bright edge or timestamp streak doesn't wash out the motion contrast."""
+    import plotly.graph_objects as go
+    kymo = np.asarray(kymo)
+    if robust and zmin is None and zmax is None:
+        zmin, zmax = _robust_clim(kymo)
+    fig = go.Figure(go.Heatmap(z=kymo, colorscale=colorscale, zmin=zmin, zmax=zmax,
+                               showscale=False))
+    fig.update_yaxes(autorange="reversed", title=ylabel, showgrid=False)
+    fig.update_xaxes(title=xlabel, showgrid=False)
+    return _apply(fig, title, height)
+
+
+
+
+# ============================================================================ image / frame hygiene
+# Remove burned-in overlays ONCE, up front, so the max-projection color scale isn't saturated by a
+# timestamp or letterbox band and the "dead-space" background ROIs aren't contaminated (the bug
+# behind the 2.9x vs 6x cell/background ratio in NB7).
+def _hw_axes(frames):
+    """Return (array, height_axis, width_axis) for a frame stack. Accepts (H, W), (F, H, W), or
+    (F, H, W, C); raises on anything else."""
+    a = np.asarray(frames)
+    if a.ndim == 2:            # (H, W)
+        return a, 0, 1
+    if a.ndim == 3:            # (F, H, W)
+        return a, 1, 2
+    if a.ndim == 4:            # (F, H, W, C)
+        return a, 1, 2
+    raise ValueError(f"frames must be 2-4 D (H,W | F,H,W | F,H,W,C), got shape {a.shape}")
+
+
+def crop_border(frames, top=0, bottom=0, left=0, right=0):
+    """Crop fixed borders off every frame — the one-liner that removes miniscope letterbox bands so
+    they stop dominating the max-projection color scale and contaminating background ROIs.
+
+    ``frames`` may be a single image ``(H, W)``, a stack ``(F, H, W)``, or a color stack
+    ``(F, H, W, C)``; the frame/channel axes are left untouched. ``top``/``bottom``/``left``/``right``
+    are pixel counts trimmed from each edge (0 = keep). Returns a view into the input array."""
+    a, hax, wax = _hw_axes(frames)
+    H, W = a.shape[hax], a.shape[wax]
+    ys = slice(int(top), H - int(bottom) if bottom else H)
+    xs = slice(int(left), W - int(right) if right else W)
+    idx = [slice(None)] * a.ndim
+    idx[hax], idx[wax] = ys, xs
+    return a[tuple(idx)]
+
+
+def mask_region(frames, boxes, fill=0.0):
+    """Paint one or more rectangular regions to a constant ``fill`` on every frame — used to blank a
+    burned-in timestamp/scale-bar. Because the region becomes STATIC, a subsequent median-background
+    subtraction removes it cleanly (a live clock survives median subtraction and saturates the
+    projection; a constant patch does not).
+
+    ``frames`` is ``(H, W)`` / ``(F, H, W)`` / ``(F, H, W, C)``. ``boxes`` is a single
+    ``(y0, y1, x0, x1)`` tuple or an iterable of them (pixel bounds, half-open). Returns a COPY with
+    the boxes filled; the input is not mutated."""
+    a, hax, wax = _hw_axes(frames)
+    a = a.copy()
+    boxes = np.asarray(boxes)
+    if boxes.ndim == 1:
+        boxes = boxes[None, :]
+    for y0, y1, x0, x1 in boxes:
+        idx = [slice(None)] * a.ndim
+        idx[hax] = slice(int(y0), int(y1))
+        idx[wax] = slice(int(x0), int(x1))
+        a[tuple(idx)] = fill
+    return a
+
+
+# ============================================================================ per-neuron-normalized shuffle
+def per_neuron_normalized_shuffle(stats_obs, stats_null):
+    """Score each neuron's observed statistic against ITS OWN circular-shift null, so a two-neuron
+    comparison lands on a common normalized axis instead of a shared ABSOLUTE one. On an absolute
+    axis a high-variance artifact neuron always sits "farthest right" regardless of whether it beats
+    its own null (the NB8 §6 defect, brief 1b); the per-neuron z / percentile fixes that.
+
+    Args:
+        stats_obs   (N,) observed statistic per neuron (e.g. spatial information, social ratio).
+        stats_null  (N, n_shuffles) null statistics — each row is that neuron's own shuffle
+                    distribution. A (n_shuffles, N) array is accepted and transposed to match N.
+    Returns a dict::
+        z           (N,) (obs - null_mean) / null_std per neuron (0 where the null has no spread).
+        percentile  (N,) fraction of that neuron's null strictly below its observed value (0..1).
+        p           (N,) one-sided permutation p = (1 + #{null >= obs}) / (1 + n_shuffles).
+        null_mean   (N,) per-neuron null mean.
+        null_std    (N,) per-neuron null std.
+    """
+    obs = np.asarray(stats_obs, float).ravel()
+    null = np.asarray(stats_null, float)
+    N = obs.shape[0]
+    if null.ndim != 2:
+        raise ValueError("stats_null must be 2-D (N, n_shuffles)")
+    if null.shape[0] != N and null.shape[1] == N:
+        null = null.T
+    if null.shape[0] != N:
+        raise ValueError(f"stats_null neuron axis {null.shape} doesn't match {N} neurons")
+    mu = np.nanmean(null, axis=1)
+    sd = np.nanstd(null, axis=1)
+    z = np.where(sd > 0, (obs - mu) / np.where(sd > 0, sd, 1.0), 0.0)
+    pct = np.nanmean((null < obs[:, None]).astype(float), axis=1)
+    nsh = null.shape[1]
+    p = (1.0 + np.nansum((null >= obs[:, None]).astype(float), axis=1)) / (1.0 + nsh)
+    return dict(z=z, percentile=pct, p=p, null_mean=mu, null_std=sd)
+
+
+# ============================================================================ deduped shared builders
+# These distribution + scatter figure builders are identical in intent to the behavior arm's, so we
+# IMPORT them straight from course_utils rather than maintain a second copy. The neural notebooks
+# thus inherit every round-3 fix automatically: violin points-drawn-on-top (fill opacity down,
+# points as a separate scatter beside a half-violin), ecdf/scatter robust axis-clipping, the
+# qualitative palette + rank auto-coloring, float64 stats. Re-bound at module scope so existing
+# `nu.strip_points_fig(...)` call sites keep working unchanged.
+strip_points_fig = cu.strip_points_fig
+violin_points_fig = cu.violin_points_fig
+box_points_fig = cu.box_points_fig
+kde2d_fig = cu.kde2d_fig
+ecdf_fig = cu.ecdf_fig
+scatter_points_fig = cu.scatter_points_fig
+umap_colored_by_feature_fig = cu.umap_colored_by_feature_fig
+
+# Shared stat/figure helpers re-exported so neural-notebook authors reach them via nu.* without a
+# separate `import course_utils` cell. All are pure numpy/scipy/sklearn/plotly with lazy heavy
+# imports, so binding them here costs nothing at import time.
+apply_house_style = cu.apply_house_style
+robust_range = cu.robust_range
+fmt_p = cu.fmt_p
+scatter_marginal_fig = cu.scatter_marginal_fig
+confusion_fig = cu.confusion_fig
+blocked_cv_auroc = cu.blocked_cv_auroc
+dominant_frequency = cu.dominant_frequency
+gridness_score = cu.gridness_score
+slopegraph_fig = cu.slopegraph_fig
+dumbbell_fig = cu.dumbbell_fig
+paired_diff_fig = cu.paired_diff_fig
+wilson_ci = cu.wilson_ci
+proportion_ci_fig = cu.proportion_ci_fig
+loo_pc_auroc = cu.loo_pc_auroc
+loo_pc_auroc_fig = cu.loo_pc_auroc_fig
