@@ -42,10 +42,11 @@ def _():
             p = os.path.dirname(p)
         return None
     ROOT = _find_root() or os.getcwd()
-    _cu = os.path.join(ROOT, "course", "course_utils.py")
-    if not os.path.exists(_cu):
-        os.makedirs(os.path.dirname(_cu), exist_ok=True)
-        urllib.request.urlretrieve(_RAW + "/course/course_utils.py", _cu)
+    for _mod in ("course_utils.py", "neural_utils.py"):   # §7 also uses neural_utils
+        _dst = os.path.join(ROOT, "course", _mod)
+        if not os.path.exists(_dst):
+            os.makedirs(os.path.dirname(_dst), exist_ok=True)
+            urllib.request.urlretrieve(_RAW + "/course/" + _mod, _dst)
     sys.path.insert(0, os.path.join(ROOT, "course"))
     import course_utils as cu
     ROOT, DATA, SCRATCH = cu.bootstrap()
@@ -1262,20 +1263,27 @@ def _(mo):
 
 
 @app.cell
-def _(leak_btn, mo, np, nu):
-    # Build the decoder's data ONCE (behind the button): one imaging session, put calcium on the
-    # behavior clock, crop the 3-min post-entry window. X = (T, ~218) population vectors, y = is_social.
+def _(ROOT, leak_btn, np):
+    # Build the decoder's data ONCE (behind the button). Reuse the SAME precomputed Week-2 (NB08)
+    # social-isolation session that ships in the bundle — no 240 MB external download. si_delta is the
+    # int8 time-delta of the z-scored, entry-cropped neural block; cumsum + dequantize recovers it.
     if not leak_btn.value:
         sess_X = None; sess_y = None; sess_info = "not loaded"
     else:
-        _d = nu.load_si()
-        _beh, _img, _ent = _d["behavior"], _d["imaging"], _d["entrances"]
+        import os as _os
+        _p = _os.path.join(ROOT, "data", "nb08_assets.npz")
+        if not _os.path.exists(_p):                   # bare checkout (e.g. molab): pull the committed file
+            import urllib.request as _urlreq
+            _RAW = _os.environ.get("COURSE_REPO_RAW",
+                "https://raw.githubusercontent.com/talmolab/sleap-social-behavior-lab/main")
+            _os.makedirs(_os.path.dirname(_p), exist_ok=True)
+            _urlreq.urlretrieve(_RAW + "/data/nb08_assets.npz", _p)
+        _a = np.load(_p, allow_pickle=False)
         _s = 6                                            # session 6 (7-day isolation), a clear signal
-        _iss = _beh[_s]["is_social_sender"].astype(bool)
-        _r = nu.zscore(nu.interp_resample(_img[_s], len(_iss), axis=0), axis=0)
-        _e = int(_ent["Int_Entry"].iloc[_s]); _t0, _t1 = _e, int(_e + 3 * 60 * nu.BEHAVIOR_FPS)
-        sess_X = _r[_t0:_t1]
-        sess_y = _iss[_t0:_t1].astype(int)
+        _lo, _hi = float(_a["si_lo"]), float(_a["si_hi"])
+        _q = np.cumsum(_a[f"si_delta_{_s}"].astype(np.int16), axis=0)
+        sess_X = ((_q.astype(np.float32) + 128.0) / 255.0) * (_hi - _lo) + _lo   # (T, neurons), z-units
+        sess_y = _a[f"si_social_{_s}"].astype(int)
         sess_info = f"session {_s}: {sess_X.shape[0]} frames × {sess_X.shape[1]} neurons, " \
                     f"{sess_y.mean():.0%} social"
     return sess_X, sess_info, sess_y

@@ -42,10 +42,11 @@ def _():
             p = os.path.dirname(p)
         return None
     ROOT = _find_root() or os.getcwd()
-    _nu = os.path.join(ROOT, "course", "neural_utils.py")
-    if not os.path.exists(_nu):
-        os.makedirs(os.path.dirname(_nu), exist_ok=True)
-        urllib.request.urlretrieve(_RAW + "/course/neural_utils.py", _nu)
+    for _mod in ("course_utils.py", "neural_utils.py"):   # neural_utils imports course_utils
+        _dst = os.path.join(ROOT, "course", _mod)
+        if not os.path.exists(_dst):
+            os.makedirs(os.path.dirname(_dst), exist_ok=True)
+            urllib.request.urlretrieve(_RAW + "/course/" + _mod, _dst)
     sys.path.insert(0, os.path.join(ROOT, "course"))
     import neural_utils as nu
     CACHE = nu.cache_dir(ROOT)
@@ -58,8 +59,14 @@ def _(ROOT, np):
     # Dropbox zip, and the 240 MB social-isolation calcium h5). Built by tools/build_nb08_assets.py.
     # The neural blocks are stored as int8 time-deltas of the z-scored traces (calcium is smooth, so
     # the delta is lossless w.r.t. the int8 quantization); recon_block cumsum-decodes + dequantizes.
-    import os as _os
-    ASSETS = dict(np.load(_os.path.join(ROOT, "data", "nb08_assets.npz"), allow_pickle=False))
+    import os as _os, urllib.request as _urlreq
+    _p = _os.path.join(ROOT, "data", "nb08_assets.npz")
+    if not _os.path.exists(_p):                       # bare checkout (e.g. molab): pull the committed file
+        _RAW = _os.environ.get("COURSE_REPO_RAW",
+            "https://raw.githubusercontent.com/talmolab/sleap-social-behavior-lab/main")
+        _os.makedirs(_os.path.dirname(_p), exist_ok=True)
+        _urlreq.urlretrieve(_RAW + "/data/nb08_assets.npz", _p)
+    ASSETS = dict(np.load(_p, allow_pickle=False))
 
     def recon_block(delta, lo, hi, axis):
         _q = np.cumsum(delta.astype(np.int16), axis=axis)          # int8 delta -> quantized levels

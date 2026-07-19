@@ -42,10 +42,11 @@ def _():
             p = os.path.dirname(p)
         return None
     ROOT = _find_root() or os.getcwd()
-    _nu = os.path.join(ROOT, "course", "neural_utils.py")
-    if not os.path.exists(_nu):
-        os.makedirs(os.path.dirname(_nu), exist_ok=True)
-        urllib.request.urlretrieve(_RAW + "/course/neural_utils.py", _nu)
+    for _mod in ("course_utils.py", "neural_utils.py"):   # neural_utils imports course_utils
+        _dst = os.path.join(ROOT, "course", _mod)
+        if not os.path.exists(_dst):
+            os.makedirs(os.path.dirname(_dst), exist_ok=True)
+            urllib.request.urlretrieve(_RAW + "/course/" + _mod, _dst)
     sys.path.insert(0, os.path.join(ROOT, "course"))
     import neural_utils as nu
     CACHE = nu.cache_dir(ROOT)
