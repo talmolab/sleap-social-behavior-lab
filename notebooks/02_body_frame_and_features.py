@@ -167,8 +167,8 @@ def _(mo):
         ## 0. What is in the dataset
 
         Before any transform, it helps to know what we are holding. The events come from **two
-        food-deprivation cohorts** (we refer to them only by their recording date tags, not by project
-        name). Each cohort is a set of home-cages recorded across three conditions — **pre**, **dep**
+        food-deprivation cohorts**, identified by their recording date tags. Each cohort is a set of
+        home-cages recorded across three conditions — **pre**, **dep**
         (food-deprived), and **post**. Cage identity is **cohort-unique**: a cage number never means the
         same cage in two cohorts, so grouping by cage never accidentally mixes cohorts. Each cage holds
         animals of a single sex, so cage is also the natural **unit** for any sex comparison — a point
@@ -376,13 +376,14 @@ def _(mo):
             r"""
             A full **Procrustes** alignment would translate, rotate, **and rescale** (and optionally
             reflect) one shape onto another. We deliberately keep only **translate + rotate** (a *rigid*
-            motion) and leave the scale alone. The reason is scientific, not lazy:
+            motion) and leave the scale alone:
 
             - **Scale is signal here.** A stretched-out mouse and a hunched mouse are genuinely different
               postures; body length is one of our 19 features. If we rescaled every event to a common
               size we would erase exactly the posture information we want to measure.
             - **Reflection would fabricate identity.** Flipping left/right would make a left-turn look
-              like a right-turn. We keep chirality.
+              like a right-turn. We keep **chirality** — the left/right handedness of the scene —
+              intact.
             - **We anchor on the body, not on motion.** An alternative is to point the frame along the
               approacher's *velocity* (its direction of travel). We instead anchor on **tail-base → head
               heading**, because a mouse can face one way while drifting another (backing up, sidestep),
@@ -654,7 +655,7 @@ def _(mo):
         ---
         ## 5. Checking invariance: rotate and move the whole cage
 
-        This is the payoff of the body-centered choice. Take the example event and apply a **rigid
+        This is what the body-centered choice buys us. Take the example event and apply a **rigid
         motion** to the *entire scene*: rotate the whole cage by some angle and slide it somewhere else.
         On the **left** the whole interaction visibly turns — the raw pixel coordinates swing with the
         cage (both the original skeletons, faint, and the rotated-and-moved ones, solid, are drawn so you
@@ -733,8 +734,8 @@ def _(EX, cu, ex_hex, feat_names, go, inv_angle, kp, mo, np):
     _h1, _x1, _y1 = _arena_meas(_warp)
 
     # RIGHT: a COMPACT table — four representative invariant features + a one-line summary over all 19,
-    # then the three arena-frame rows that DO change. (The old version listed all 19 rows; a handful
-    # plus the summary makes the same point without the wall of text.)
+    # then the three arena-frame rows that DO change. We show a representative handful plus a summary
+    # over all 19.
     _show = ["pair_dist_mean", "appe_faces_appr", "heading_alignment", "triangle_area_mean"]
     _rows = []
     for _nm in _show:
@@ -996,9 +997,8 @@ def _(mo):
           past impossible values. For a **small shift** or a **heavy tail** it is the clearer chart; the
           box below the plot says when to trust which.
 
-        The header reports the Mann–Whitney p-value (computed in float64 so a tiny value never prints as
-        `0.0e+00`) and Cohen's d. Start on `appe_angvel` and watch the two clouds separate; then try
-        `heading_alignment` and see them sit almost on top of each other.
+        The header reports the Mann–Whitney p-value and Cohen's d. Start on `appe_angvel` and watch the
+        two clouds separate; then try `heading_alignment` and see them sit almost on top of each other.
         """
     )
     return
@@ -1019,7 +1019,7 @@ def _(X, agg, cu, feat_names, feat_pick, mo, np):
     _grp = np.where(agg == 1, "aggression", "not aggression")
     _cols = {"aggression": cu.RANK_HEX[1], "not aggression": "#7f7f7f"}   # red vs gray
 
-    # float64 BEFORE the test so an extremely small p does not underflow to exactly 0 (the old bug).
+    # float64 BEFORE the test so an extremely small p does not underflow to exactly 0.
     _a = _vals[agg == 1]; _b = _vals[agg == 0]
     _a = _a[np.isfinite(_a)].astype(np.float64); _b = _b[np.isfinite(_b)].astype(np.float64)
     _u, _p = _mwu(_a, _b)
@@ -1051,8 +1051,8 @@ def _(mo):
               fraction above one). Do not trust a violin for a subtle effect.
             - **ECDF:** the safest default for comparing **whether one group tends to be larger** (a tail
               or shift question). It plots the real data with no smoothing, so it never fabricates
-              density. Two curves that separate = stochastic dominance. Slightly harder to read a *mode*
-              from.
+              density. Two curves that pull apart mean one group tends to be larger at every level.
+              Slightly harder to read a *mode* from.
             - **Strip / raincloud (every point):** best for **small n**, where you want to see each
               observation and a violin would be a lie. Gets cluttered for thousands of points.
 
@@ -1080,9 +1080,9 @@ def _(mo):
         from −1 (perfect anti-correlation) through 0 (unrelated) to +1 (perfectly linearly related).
 
         These two track each other almost perfectly (r ≈ 0.92): when the bystander is far on average, its
-        closest approach is also far. Knowing one tells you most of the other. When features are this
-        redundant, 19 numbers are really only a handful of independent directions — which is exactly the
-        motivation for the dimensionality reduction we take up in **NB04**.
+        closest approach is also far. Knowing one tells you most of the other. This is the first hint that
+        the 19 features occupy fewer independent directions than their count suggests — the next section
+        makes that idea precise.
         """
     )
     return
@@ -1110,7 +1110,143 @@ def _(mo):
     mo.md(
         r"""
         ---
-        ## 7. Exercise — do aggressive approaches provoke a stronger reaction?
+        ## 7. What the feature space can and cannot represent
+
+        Stack every event's 19 numbers as a row, one row per event, and the whole dataset becomes a
+        single matrix `X` of shape **(2499, 19)** — 2499 events down, 19 features across. Writing it this
+        way lets us ask three precise questions about the features we chose, each a standard idea from
+        linear algebra. Each is defined below in plain terms and then tied to these 19 features.
+
+        ### Row space — which feature-vectors events actually produce
+
+        The **row space** of `X` is the set of all 19-number vectors you can build as weighted sums of the
+        event rows. Think of it as the space the data *fills up*. If two features were exactly redundant —
+        one always a fixed multiple of another — every event would lie on a lower-dimensional flat inside
+        the 19-dimensional feature space, and the row space would have **fewer than 19 dimensions**.
+
+        Here, honestly, that does not quite happen: all 19 directions are used, so `X` has **full rank 19**
+        and there is no exact redundancy to collapse. But the data is far from filling the space evenly.
+        The **singular values** of `X` — the amounts of spread along its 19 principal directions, from
+        most to least — fall off smoothly from **91.9** down to **12.4**, with no sharp cliff. A standard
+        summary called the **effective dimension** (roughly, how many directions the spread is really
+        concentrated in) works out to about **9.5**, and just **11** of the 19 directions already account
+        for **90%** of the total spread. That near-flatness *is* the `bystander_dist_mean` /
+        `bystander_dist_min` redundancy from the previous scatter, measured across all 19 features at
+        once, and it is exactly what the dimensionality reduction in **NB04** exploits.
+
+        ### Column space — which questions a linear analysis can even pose
+
+        The **column space** of `X` is the span of its 19 feature columns: everything you can build as a
+        weighted sum of the features. This matters because **every linear readout of the dataset is a
+        vector in this span.** An "aggression score" formed as a weighted sum of the 19 features — like
+        the effect-size axis from Section 6 — lives here. So does any score a linear model could learn.
+
+        The consequence sets a ceiling. If some real distinction between events *cannot* be written as any
+        weighted sum of these 19 features, it lies **outside** the column space, and **no linear model
+        built on `X` can express it**, no matter how it is fit. The features we pick decide, in advance,
+        which questions a linear analysis is even able to ask.
+
+        ### Null space — the questions `X` cannot answer
+
+        The **null space** is the key idea here. In the strict matrix sense `X` has none to speak of (it is full
+        rank). The null space that matters is that of the *summarizing map itself*: the operation that
+        takes a whole event — all frames, all three mice, in raw pixels — and crushes it down to 19
+        numbers. Its null space is **the set of ways an event can differ while leaving all 19 numbers
+        unchanged.** Those are precisely the questions `X` cannot answer. Two concrete directions live in
+        it:
+
+        - **Arena pose (Section 5).** Rotate or slide the whole cage and all 19 numbers hold to within
+          rounding. This null direction is *intended*: where in the room the cage sits is not behavior, so
+          erasing it is the entire purpose of the body frame.
+        - **The direction of time (figure below).** Play the clip backward and **18 of the 19 numbers are
+          exactly unchanged**; only `closing_speed` flips sign, because it is the one feature that
+          encodes a direction of motion. The whole temporal **order** of an event — which came first, the
+          approach or the retreat — lives almost entirely in the null space of these summaries.
+
+        So there are real questions `X` simply cannot answer: **when** in the clip the fast turn happened,
+        whether the approach was smooth or jerky beyond its mean and peak, and **where** in the cage it
+        occurred. The first two are recovered in **NB03**, which keeps the per-frame trace the summaries
+        throw away; the third needs the raw arena coordinates, which is why we keep them on disk.
+
+        ### A two-feature picture of the same idea
+
+        Suppose an event were summarized by only two features, and the second were always exactly twice
+        the first:
+
+        $$
+        \mathbf{f} = \begin{bmatrix} f_1 \\ f_2 \end{bmatrix},
+        \qquad f_2 = 2\,f_1 .
+        $$
+
+        Then every possible feature-vector points along the single line $\begin{bmatrix}1 & 2\end{bmatrix}$
+        — the **column space is a line**, not the full plane, so a second feature bought nothing. And any
+        change to the raw event that scales $f_1$ and $f_2$ together by the same factor moves along that
+        line, while a change that would need $f_2 \ne 2 f_1$ can never be represented at all: it is in the
+        **null space** of this two-number summary. The 19 real features are not this degenerate — they
+        are full rank — but the geometry is the same, only softened: many directions carry almost the same
+        information, and whole classes of difference (arena pose, time order) are erased by design.
+        """
+    )
+    return
+
+
+@app.cell
+def _(X, EX, cu, feat_names, go, kp, np):
+    # Null space made visible: reverse the clip in time and recompute the 19 features. 18 are byte-for-
+    # byte unchanged; only closing_speed (a signed rate) flips sign. Z-score both forward and reversed
+    # vectors by the CORPUS mean/std of X so the 19 differently-scaled features share one axis.
+    _mu = np.nanmean(X, axis=0)
+    _sd = np.nanstd(X, axis=0)
+    _f_fwd = cu.features_one(kp[EX].astype(float))
+    _f_rev = cu.features_one(kp[EX][::-1].astype(float).copy())
+    _zf = (_f_fwd - _mu) / _sd
+    _zr = (_f_rev - _mu) / _sd
+
+    _fig = go.Figure()
+    # light connecting segment between the forward and reversed value of each feature
+    for _k in range(len(feat_names)):
+        _fig.add_scatter(x=[_zf[_k], _zr[_k]], y=[feat_names[_k], feat_names[_k]], mode="lines",
+                         line=dict(color="#cccccc", width=2), showlegend=False, hoverinfo="skip")
+    _fig.add_scatter(x=_zf, y=feat_names, mode="markers", name="forward",
+                     marker=dict(symbol="circle", size=9, color="#1f77b4"),
+                     hovertemplate="%{y}<br>forward z = %{x:.2f}<extra></extra>")
+    # Draw the reversed marker as an OPEN diamond so the forward circle underneath stays visible where
+    # the two coincide — otherwise a filled diamond hides the circle and "sit on top of each other"
+    # cannot be seen.
+    _fig.add_scatter(x=_zr, y=feat_names, mode="markers", name="time-reversed",
+                     marker=dict(symbol="diamond-open", size=14, color="#d62728",
+                                 line=dict(color="#d62728", width=2.5)),
+                     hovertemplate="%{y}<br>reversed z = %{x:.2f}<extra></extra>")
+    _fig.update_xaxes(title="feature value (z-scored across corpus)", showgrid=False, zeroline=True)
+    _fig.update_yaxes(showgrid=False)
+    _fig.update_layout(template="plotly_white", height=560, margin=dict(l=10, r=10, t=50, b=10),
+                       title="Playing the clip backward: 18 of 19 features do not move",
+                       legend=dict(y=0.99, x=0.99, xanchor="right", bgcolor="rgba(255,255,255,0.6)"))
+    _fig
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(
+        r"""
+        This is the null space made visible. For 18 features the forward marker (blue circle) sits nested
+        exactly inside the reversed marker (open red diamond) — the two land on the same value, so
+        reversing time did not move them. Only `closing_speed` shows a connecting segment, because it is a
+        *signed* rate: run the clip backward
+        and a gap that was closing is now opening, so its sign flips. The 19 features are, by
+        construction, blind to the direction of time except for that single sign.
+        """
+    )
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(
+        r"""
+        ---
+        ## 8. Exercise — do aggressive approaches provoke a stronger reaction?
 
         ### Python skill practiced: **array arithmetic + boolean masks**
 
@@ -1208,8 +1344,8 @@ def _(mo):
             about **0.13** in the low-turning half — a nearly four-fold difference from a single kinematic
             feature — and the two Wilson intervals ([0.48, 0.54] vs [0.11, 0.15]) do not come close to
             overlapping, so the gap is not a sampling fluke. This confirms the effect-size chart from the
-            other direction: an aggressive approach is one the approached mouse *reacts* to. Note that we
-            plotted the **outcome** (the aggression rate), not the turning rate we split on — plotting the
+            other direction: an aggressive approach is one the approached mouse *reacts* to. The chart shows the
+            **outcome** (the aggression rate), not the turning rate we split on — plotting the
             split variable itself would only show the split we imposed by hand, which proves nothing.
             """
         )
@@ -1254,7 +1390,7 @@ def _(mo):
     mo.md(
         r"""
         ---
-        ## 8. Exercise — how often does the transform silently fail?
+        ## 9. Exercise — how often does the transform silently fail?
 
         ### Python skill practiced: **vectorized boolean tests across a whole array axis (`.all` / `.any`)**
 
@@ -1364,7 +1500,7 @@ def _(mo):
 
         1. **Silent fallback to raw coordinates.** If the approacher's head or tail-base is missing on
            *every* frame, `allocentricize` cannot find a heading and returns the event **unchanged** —
-           the features are then computed in raw arena coordinates and are *not* invariant. Exercise 8
+           the features are then computed in raw arena coordinates and are *not* invariant. Exercise 9
            just counted these: **4 of 2499**. Rare, but invisible unless you audit for it — and
            head/tail dropout are exactly the nodes NB01 flagged as least reliable.
         2. **One bad frame rotates the whole scene.** The transform reads the heading from a *single*

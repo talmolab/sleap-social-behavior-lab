@@ -125,8 +125,9 @@ def _(ho, mo):
         <div style="margin-top:8px; font-size:0.95em; color:#555;">
         A measurement or a decoder is only convincing if it works on data it was never tuned on. We
         therefore set Camera 16 aside now and open it only in Week 2, to test the finished pipeline on
-        a cage it has never seen. This cage happens to be all female, which matters for the sex
-        comparison we make later — but that is a Week-2 concern; here we simply leave it closed.
+        a cage it has never seen. This cage happens to be all female. The sex comparison in NB05 is run
+        entirely on the training data; this sealed cage is held back for the Week-2 test of whether the
+        finished pipeline generalizes to a cage it never saw. Here we simply leave it closed.
         </div>
         </div>
         """
@@ -288,11 +289,11 @@ def _(cu, ex_kp, mo):
 
 
 @app.cell
-def _(cu, ex_cols, ex_kp, np):
-    # A labelled diagram of the skeleton so you know what the 15 keypoints are and how they connect.
-    # There are no raw video frames in this teaching bundle, so instead of drawing on a photo we draw
-    # one real pose on a blank canvas and print every keypoint's index and name. We take the
-    # approacher's most-complete frame and color it by the approacher's rank (Sub = green).
+def _(cu, ex_cols, ex_kp, mo, np):
+    # A labelled diagram of the 15 keypoints and how they connect, drawn from one real pose (the
+    # approacher's most-complete frame, colored by its rank, Sub = green), with a photograph of the
+    # same animal beneath so the schematic reads as an abstraction of a real mouse.
+    import base64
     _nfin = np.isfinite(ex_kp[:, 0]).all(axis=2).sum(axis=1)   # tracked-node count per frame
     _best = int(np.argmax(_nfin))
     _pose = ex_kp[_best, 0]                                    # (15, 2) one mouse, one frame
@@ -303,7 +304,18 @@ def _(cu, ex_cols, ex_kp, np):
     # plot-area edge (plotly clips scatter text at the axes by default).
     _fig.update_traces(cliponaxis=False)
     _fig.update_layout(margin=dict(l=10, r=200, t=40, b=10))
-    _fig
+    with open(cu.data_path("data/assets/nb01_mouse_photo.png"), "rb") as _fh:
+        _b64 = base64.b64encode(_fh.read()).decode()
+    _photo = mo.Html(
+        f'<img src="data:image/png;base64,{_b64}" '
+        'style="max-width:440px;width:100%;border:1px solid #ddd;border-radius:6px">')
+    mo.vstack([
+        _fig,
+        mo.md("*The mouse the pose above is traced from — a single video frame of one animal in its "
+              "homecage. Each keypoint in the schematic marks a landmark on this body: the nose and "
+              "head at the front, the tail chain trailing behind.*"),
+        _photo,
+    ])
     return
 
 
@@ -317,7 +329,8 @@ def _(mo):
         — haunches, trunk, and the four tail keypoints (`tail_1`, `tail_0`, `tail_2`, `tail_tip`). Keep
         this picture in mind: when we later talk about a keypoint dropping out, or two mice being
         confused, this is the object it happens to. The head-to-TTI axis is also the mouse's facing
-        direction, which becomes central in NB02.
+        direction, which becomes central in NB02. The photograph beneath the diagram is the animal the
+        pose was traced from; every dot in the schematic marks a landmark on that real body.
         """
     )
     return
@@ -361,11 +374,11 @@ def _(cu, ex_cols, ex_cr, ex_kp, ex_ranks, frame_slider, mo):
 @app.cell
 def _(cu, ex_cr, ex_kp, ex_ranks, mo):
     # The same event as a short looping GIF (embedded as a data-URI so it animates in the notebook).
-    # The rendered GIF adds a white line joining the two interacting centroids and a small red dot in
+    # The rendered GIF adds a black line joining the two interacting centroids and a small red dot in
     # the corner during the contact frames (both drawn by cu.render_frames).
     _gif = cu.event_gif_bytes(ex_kp, ex_ranks, contact_rel=ex_cr, cell=200, fps=20)
     mo.vstack([mo.md("*The whole 2.6 s at a glance: the approacher (Sub, green) closes on the "
-                     "approachee (Mid, blue) while the bystander (Dom, red) sits apart. The white line "
+                     "approachee (Mid, blue) while the bystander (Dom, red) sits apart. The black line "
                      "joins the two interacting mice and the small red dot in the corner marks the "
                      "contact frames. This is a calm, non-aggressive approach — a reminder that most "
                      "encounters are not fights.*"),
@@ -511,10 +524,8 @@ def _(cu, ev, np):
 
 @app.cell
 def _(cu, go, nr):
-    # A lollipop chart (marker + stem), not a bar chart, so each keypoint reads as one data POINT
-    # rather than a filled area — appropriate when the quantity is a single value per category and we
-    # want to compare heights, not sum areas. Tail keypoints are highlighted because they are the weak
-    # link. The y-axis starts at 0 and stops just above 1 so the ~0.73-0.98 band fills the panel.
+    # Tail keypoints are highlighted (tail_tip in red, the rest of the tail chain in orange) because
+    # they are the weakest link. The y-axis spans 0 to just above 1 so the full fraction is in view.
     _tail = {9, 10, 12, 13}
     _tip = cu.NODE_NAMES.index("tail_tip")
     _cols = ["#e45756" if i == _tip else ("#f2a25c" if i in _tail else "#4c78a8")
@@ -532,20 +543,6 @@ def _(cu, go, nr):
                        margin=dict(l=10, r=10, t=50, b=90))
     _fig.update_xaxes(tickangle=-45, showgrid=False)
     _fig
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md(
-        r"""
-        **Why a lollipop and not a bar chart?** Each keypoint has exactly **one** number here — its
-        tracked fraction. A bar fills the whole area from 0 to that value, which invites the eye to
-        compare *areas* and can exaggerate small differences near the top of the scale. A lollipop
-        draws a thin stem and a single marker at the value, so you compare marker *heights* directly.
-        When a category maps to one value, prefer the point; save bars for genuine counts or sums.
-        """
-    )
     return
 
 
@@ -626,22 +623,23 @@ def _(mo):
         r"""
         **Putting a number on it: how often is identity actually unrecoverable?** The tail is not just
         "the weak keypoint" in the abstract — it is *the* cue the pipeline uses to tell the mice apart,
-        because each animal wears a distinct pattern of dye marks on its tail. So we can turn the
-        reliability gap into the concrete identity-error rate the rest of the course keeps citing, using
-        only what is in this bundle. The logic is simple:
+        because each animal wears a distinct pattern of dye marks on its tail. We can turn the
+        reliability gap into a concrete rate using only what is in this bundle. The key is that there
+        are **three** mice, and their identities are not independent:
 
-        - Identity is re-read by *looking at a tail mark*. That is only possible on a frame where the
-          tail is actually tracked.
-        - With just two interacting mice, a dropout on **one** of them is still recoverable: read the
-          tail that *is* visible, and the other mouse is fixed by elimination.
-        - Identity is genuinely **lost** only on frames where **both** interacting mice's tail chains
-          vanish *at the same time* — neither mark is readable, so which body is which can only be
-          guessed.
+        - Identity is re-read by *looking at a tail mark*, which is only possible on a frame where that
+          mouse's tail is actually tracked.
+        - With three mice, reading any **two** tails fixes the **third by elimination** — if two marks
+          are identified, the remaining mouse is whichever identity is left over.
+        - So one mouse losing its tail on a frame is still recoverable: read the other two, and it is
+          pinned by elimination. Identity is genuinely **unresolvable** only when **two or more** of
+          the three tails vanish on the *same* frame, leaving too little to pin the rest.
 
         We therefore count, for every event, whether it contains at least one such **unresolvable
-        frame** (both interacting tails gone at once). That per-event rate is a direct, in-bundle proxy
-        for the tail-mark identity-error rate — and it lands right where the pipeline's documented value
-        does.
+        frame** (two or more tails gone at once). Because a single ambiguous frame is an opening for a
+        swap to go uncaught, that per-event rate is an **upper bound on the opportunity for an uncaught
+        identity error** — a ceiling on how often the tail cue alone could fail, not a measured
+        mislabelling rate.
         """
     )
     return
@@ -649,16 +647,19 @@ def _(mo):
 
 @app.cell
 def _(cu, ev, np):
-    # Derive the tail-mark identity-error rate from the data instead of asserting it. Presence mask over
-    # the four tail nodes; a tail is "readable" on a frame if AT LEAST ONE tail node is tracked there.
+    # Derive the tail-mark identity-loss rate from the data instead of asserting it. Presence mask over
+    # the four tail nodes; a tail is "readable" on a frame if AT LEAST ONE of its four nodes is tracked.
+    # With three mice, reading any TWO tails fixes the third by elimination, so identity is unresolvable
+    # on a frame only when TWO OR MORE of the three tails are gone at once.
     _tail = [9, 10, 12, 13]
     _ok = np.isfinite(ev["kp"]).all(axis=-1)                    # (N, T, 3, 15) True where node tracked
-    _tail_any = _ok[:, :, :, _tail].any(axis=-1)               # (N, T, 3) tail readable on this frame?
-    _drop = (~_tail_any[:, :, 0]) | (~_tail_any[:, :, 1])      # >=1 interacting tail gone (either mouse)
-    _unres = (~_tail_any[:, :, 0]) & (~_tail_any[:, :, 1])     # BOTH interacting tails gone same frame
+    _tail_any = _ok[:, :, :, _tail].any(axis=-1)               # (N, T, 3) tail readable for each mouse?
+    _n_gone = (~_tail_any).sum(axis=-1)                         # (N, T) how many of the 3 tails are gone
+    _drop = (_n_gone >= 1)                                      # >=1 of 3 tails gone (recoverable)
+    _unres = (_n_gone >= 2)                                     # >=2 of 3 gone -> elimination fails
     n_events = len(ev["kp"])
-    drop_n = int(_drop.any(axis=1).sum())                      # events with any tail-dropout frame
-    unres_n = int(_unres.any(axis=1).sum())                    # events with any unresolvable frame
+    drop_n = int(_drop.any(axis=1).sum())                      # events with >=1 tail-missing frame
+    unres_n = int(_unres.any(axis=1).sum())                    # events with >=1 unresolvable frame
     unres_frac = unres_n / n_events
     unres_lo, unres_hi = cu.wilson_ci(unres_n, n_events)
     return drop_n, n_events, unres_frac, unres_hi, unres_lo, unres_n
@@ -666,14 +667,20 @@ def _(cu, ev, np):
 
 @app.cell
 def _(cu, drop_n, n_events, unres_n):
-    # Plot the OUTCOME rate (fraction of events) with Wilson CIs, not a raw distribution: tail dropouts
-    # are near-ubiquitous, but the identity-breaking case (both tails gone at once) is the ~16% figure.
-    cu.proportion_ci_fig(
+    # Plot the OUTCOME rate (percent of events) with Wilson CIs, not a raw distribution: tail dropouts
+    # are near-ubiquitous, while the identity-breaking case (>=2 of 3 tails gone at once) is rarer.
+    # Full 0-100% axis and large markers so both rates read against the whole scale.
+    _fig = cu.proportion_ci_fig(
         [drop_n, unres_n], [n_events, n_events],
-        ["any tail dropout\n(≥1 frame)", "both tails gone at once\n(identity unresolvable)"],
+        ["any tail missing<br>(≥1 of 3 tails, ≥1 frame)",
+         "identity unresolvable<br>(≥2 of 3 tails gone)"],
         colors=["#4c78a8", "#e45756"],
-        ylabel="fraction of events",
+        ylabel="percent of events",
         title="How often the tail-mark cue for identity fails")
+    _fig.update_yaxes(range=[0, 1], tickvals=[0, .2, .4, .6, .8, 1.0],
+                      ticktext=["0%", "20%", "40%", "60%", "80%", "100%"])
+    _fig.update_traces(marker_size=20)
+    _fig
     return
 
 
@@ -681,24 +688,23 @@ def _(cu, drop_n, n_events, unres_n):
 def _(drop_n, mo, n_events, unres_frac, unres_hi, unres_lo, unres_n):
     mo.md(
         f"""
-        **The ~16% error, derived here.** Tail dropouts are almost universal — **{drop_n}** of
-        **{n_events}** events ({100 * drop_n / n_events:.0f}%) contain at least one frame where an
-        interacting mouse loses its tail. Most of those are single-mouse dropouts and are recoverable.
-        The frames that truly break identity are the ones where **both** interacting tails vanish
+        **What the numbers say.** Tail dropouts are almost universal — **{drop_n}** of **{n_events}**
+        events ({100 * drop_n / n_events:.0f}%) contain at least one frame where a mouse loses its
+        tail. Most of those are single-mouse dropouts and are recoverable by elimination. The frames
+        that truly break identity are the ones where **two or more** of the three tails vanish
         together, and those occur in **{unres_n} of {n_events} events = {100 * unres_frac:.1f}%**
-        (Wilson 95% CI **{100 * unres_lo:.1f}–{100 * unres_hi:.1f}%**). That is the concrete,
-        data-derived origin of the **~16% tail-mark identity error** we cite throughout the course: on
-        roughly one event in six there is a moment where the tracker simply cannot read which mouse is
-        which from the tail, and identity there is a guess.
+        (Wilson 95% CI **{100 * unres_lo:.1f}–{100 * unres_hi:.1f}%**). On roughly **two events in
+        five**, then, there is at least one moment where the tail marks alone cannot say which body is
+        which.
 
-        Two honesties about this number. It is a *lower bound on opportunity for error*, not a measured
-        mislabelling rate — an unresolvable frame is a moment where a swap *could* go uncaught, and the
-        source pipeline's documented ~16% figure is the rate at which such moments actually turn into
-        wrong labels; the two coincide here because that is where the errors come from. And it counts a
-        whole event as affected if it has even one unresolvable frame, which is the right unit precisely
-        because a single swap relabels the rest of the event (Section 4). Either way, the take-home is
-        the same: rank and identity labels are reliable most of the time but carry a real ~16% caveat,
-        so we prefer rank-free analyses where we can.
+        Read this number honestly. It is an **upper bound on the opportunity for an uncaught swap**,
+        not a measured error rate: an unresolvable frame is a moment where a swap *could* slip through,
+        but the tracker also leans on smooth motion and frame-to-frame matching (Section 4), which
+        resolve most of those moments correctly, so the rate of actual wrong labels is far lower. It
+        also counts a whole event as affected if it has even one bad frame, which is the right unit
+        precisely because a single swap relabels the rest of the event. The take-home is unchanged:
+        rank and identity labels are reliable most of the time but carry a real caveat, so we prefer
+        rank-free analyses where we can.
         """
     )
     return
@@ -925,6 +931,106 @@ def _(closest_dist, der, mo, np):
 def _(mo):
     mo.md(
         r"""
+        ### The full approach definition, and exploring it
+
+        We have been calling these events "approaches." Here is what that word means precisely. The
+        pipeline builds an approach in **two layers**.
+
+        **Layer 1 — detection (is there an approach at all?).** This layer does not care *which* mouse
+        is which; it only asks whether two of the three mice came together. Two mice's body centroids
+        (the average position of their body keypoints) must come **within 200 px** of each other after
+        having been **at least 200 px apart for at least 0.5 s**, with **at least one** of them moving
+        **at least 2 px/frame**, during the dark phase of the light cycle (when these nocturnal animals
+        are active). The 200 px trigger is a wider gate than the 150 px "bodies within one body length"
+        mark from the figure above: 200 px catches the *start* of a closing approach, while 150 px is
+        the tighter distance at which the two bodies are actually touching.
+
+        **Layer 2 — assignment (who approached whom?).** Once an approach is detected, the pipeline
+        decides which mouse is the **approacher**, which is the **approachee**, and which is the
+        **bystander** — the ordering `[approacher, approachee, bystander]` stored in the array. First it
+        picks the **interacting pair**: over the first second, the two mice that stay closest for
+        longest, measured from each mouse's **head (node 1)** to the other's body centroid. Then, within
+        that pair, the **approacher** is the mouse that is both **moving toward** the other (its centroid
+        velocity points at the other mouse) *and* **facing** it. *Facing* is the cosine of the angle
+        between the mouse's heading — the body axis running from its tail–torso junction (TTI) to its
+        head — and the direction to the other mouse: **+1** means aimed straight at it, **0** means
+        side-on, **−1** means aimed directly away. The remaining mouse of the pair is the approachee,
+        and the third mouse is the bystander.
+
+        The controls below let you vary the three thresholds this definition rests on and watch which
+        events survive. The defaults — **200 px** and **2 px/frame** — are the detection pipeline's own
+        values, chosen from what a mouse's body and ordinary movement look like at this camera scale;
+        the **facing floor** starts at 0 (side-on or better), and raising it is what separates a
+        *directed* approach from two mice that merely drift close without aiming at each other.
+        """
+    )
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    dist_ceiling = mo.ui.slider(50, 325, value=200, step=5, label="centroid-distance ceiling (px)",
+                                debounce=True, full_width=True)
+    facing_floor = mo.ui.slider(-1.0, 1.0, value=0.0, step=0.05, label="approacher-facing floor (cosine)",
+                                debounce=True, full_width=True)
+    speed_floor = mo.ui.slider(0.0, 10.0, value=2.0, step=0.5, label="approacher-speed floor (px/frame)",
+                               debounce=True, full_width=True)
+    return dist_ceiling, facing_floor, speed_floor
+
+
+@app.cell
+def _(der, dist_ceiling, facing_floor, go, mo, np, speed_floor):
+    # Explore the approach definition across all 2499 events. Each point is one event:
+    #   x = closest centroid distance the pair reached (pair_dist_min, feature 9),
+    #   y = how much the approacher faced the approachee (appr_faces_appe, feature 12; cosine in [-1,1]).
+    # An event QUALIFIES when it clears all three thresholds. The speed floor uses the mean approacher
+    # centroid speed (appr_speed_mean, feature 0) and has no axis of its own, so a point can lie inside
+    # the red-and-green box yet still be excluded (grey) for moving too slowly.
+    _pdmin = der["X"][:, 9]; _faces = der["X"][:, 12]; _speed = der["X"][:, 0]
+    _dc = dist_ceiling.value; _ff = facing_floor.value; _sf = speed_floor.value
+    _qual = (_pdmin <= _dc) & (_faces >= _ff) & (_speed >= _sf)
+    _n = int(np.sum(_qual)); _N = len(_pdmin)
+    _fig = go.Figure()
+    _fig.add_scatter(x=_pdmin[~_qual], y=_faces[~_qual], mode="markers", name="excluded",
+                     marker=dict(size=5, color="#c9c9c9", opacity=0.5))
+    _fig.add_scatter(x=_pdmin[_qual], y=_faces[_qual], mode="markers", name="qualifies",
+                     marker=dict(size=5, color="#4c78a8", opacity=0.6))
+    _fig.add_vline(x=_dc, line=dict(color="#e45756", dash="dash"),
+                   annotation_text=f"distance ceiling = {_dc:g} px", annotation_position="top right")
+    _fig.add_hline(y=_ff, line=dict(color="#2ca02c", dash="dash"),
+                   annotation_text=f"facing floor = {_ff:.2f}", annotation_position="bottom right")
+    _fig.update_layout(template="plotly_white", height=480,
+                       title=dict(text=f"{_n} of {_N} events qualify as directed approaches", y=0.97),
+                       xaxis_title="closest centroid distance reached (px)",
+                       yaxis_title="approacher faces approachee (cosine)",
+                       margin=dict(l=10, r=10, t=90, b=10),
+                       legend=dict(orientation="h", yanchor="bottom", y=1.01, x=0))
+    _fig.update_xaxes(range=[0, 330], showgrid=False)
+    _fig.update_yaxes(range=[-1, 1], showgrid=False)
+    mo.vstack([dist_ceiling, facing_floor, speed_floor, _fig])
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(
+        r"""
+        Tightening the **distance ceiling** (the red line slides left) drops events that never got
+        close. Raising the **facing floor** (the green line slides up) drops events where the approacher
+        never aimed at the partner — the diffuse band of low-facing points falls away. Raising the
+        **speed floor** removes events with little motion; watch points inside the box turn grey. The
+        full pipeline lives in the lower-right-and-up corner: **close, aimed, and moving**. There is no
+        single correct setting — each threshold trades how many events you keep against how strictly you
+        insist an event is a genuine directed approach.
+        """
+    )
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(
+        r"""
         ---
         ## 4 · A slot is not an identity: the swap problem
 
@@ -1024,7 +1130,7 @@ def _(cu, mo, tight_cr, tight_kp, tight_ranks):
         mo.md("*The tight-contact aggression event used above. Around the contact frames the two "
               "bodies nearly overlap — so if the tracker exchanged them here, each centroid would move "
               "only ~48 px, well under any threshold that still ignores ordinary running. Colors are "
-              "by rank; the white line joins the two interacting centroids.*"),
+              "by rank; the black line joins the two interacting centroids.*"),
         mo.Html(cu.gif_img_html(_gif, width=240)),
     ])
     return
@@ -1194,9 +1300,9 @@ def _(mo):
           those marks and re-attaches the right label to the right body — information a velocity
           detector never uses. The weakness is the one we already measured: the tail is the least
           reliable part of the skeleton (Section 2), tracked only ~73–80% of the time, so the mark is
-          often not visible exactly when a swap needs resolving. This is the mechanism behind the
-          number we derived in Section 2: on ~16% of events both interacting tails vanish together for
-          at least one frame, and on those frames identity cannot be re-read from the mark at all.
+          often not visible exactly when a swap needs resolving. That is the reading behind Section 2:
+          on ~40% of events there is at least one frame where two or more tails are gone at once, so
+          the marks alone cannot re-read identity — an upper bound on where an uncaught swap could hide.
         - **Hungarian matching.** Frame by frame, the tracker must assign this frame's detections to
           last frame's tracks. It scores every possible assignment by total displacement and picks the
           assignment with the smallest total — the **Hungarian algorithm**, a standard method for
@@ -1208,7 +1314,7 @@ def _(mo):
         motion (Hungarian matching), appearance (tail marks), and velocity sanity checks — and it is
         weakest at contact, where behavior matters most. This is why later notebooks prefer analyses
         that do not hinge on which specific mouse is which (rank-free features), and why any rank-split
-        result carries the ~16% caveat. It is also the behavioral rehearsal for a problem we meet again
+        result carries the identity caveat. It is also the behavioral rehearsal for a problem we meet again
         in Week 2: linking the *same unit* (a mouse here, a neuron there) across time when the signal
         is ambiguous.
         """
@@ -1626,12 +1732,11 @@ def _(mo):
            population level (the approacher out-moves the approachee ~68% of the time). We can build on
            all three.
         3. **Where it is not:** the tail keypoints are missing ~20–25% of the time, which weakens the
-           tail-mark identity and rank labels — we measured that ~16% of events contain a frame where
-           both interacting tails vanish together and identity cannot be re-read (Section 2); identity
-           swaps are nearly undetectable at
-           contact — exactly where the interesting behavior happens; and a naive per-event test
-           overstates confidence because events cluster in a handful of cages. We carry all three
-           caveats forward.
+           tail-mark identity and rank labels — on ~40% of events there is at least one frame where two
+           or more tails vanish at once and identity cannot be re-read, an upper bound on where an
+           uncaught swap could hide (Section 2); identity swaps are nearly undetectable at contact —
+           exactly where the interesting behavior happens; and a naive per-event test overstates
+           confidence because events cluster in a handful of cages. We carry all three caveats forward.
 
         **The next question.** Right now an event is described by where each mouse sits in the camera's
         pixel grid, so the same behavior looks completely different depending on which corner of the

@@ -49,8 +49,9 @@ def _():
             urllib.request.urlretrieve(_RAW + "/course/" + _mod, _dst)
     sys.path.insert(0, os.path.join(ROOT, "course"))
     import neural_utils as nu
+    import course_utils as cu           # nu imports cu internally; the notebook needs the name too
     CACHE = nu.cache_dir(ROOT)
-    return CACHE, ROOT, go, np, nu, os
+    return CACHE, ROOT, cu, go, np, nu, os
 
 
 @app.cell
@@ -77,16 +78,16 @@ def _(mo):
         r"""
         # NB7 · From a movie to traces — the neural twin of NB1–2
 
-        ## Where Week 1 left us, and what Week 2 adds
+        ## Where the behaviour arm left us, and what the neural arm adds
 
-        Across Week 1 we built an objective readout of *what a mouse does*. We started from a raw
+        Across the behaviour notebooks we built an objective readout of *what a mouse does*. We started from a raw
         recording of two interacting mice, ran it through a pose tracker to get **keypoints** (the
         labelled body parts of each animal at each frame), audited how reliable those points are
         (NB1), rebuilt each animal's motion in its own body frame and turned it into **features**
         (NB2), and went on to compress, cluster, and decode that behaviour. The through-line was a
         single sentence: *turn a movie into numbers we can do statistics on.*
 
-        Week 2 studies the **neural basis** of that behaviour. We record the brain while the animal
+        The neural arm studies the **neural basis** of that behaviour. We record the brain while the animal
         behaves, and the recording is, once again, a movie — this time of glowing brain tissue. So
         the very first job is the same one we already solved for pose: turn a movie into numbers.
         This notebook asks:
@@ -106,16 +107,21 @@ def _(mo):
         3. **Demix the whole population** (CNMF) — learn a *shape* and a *trace* for every neuron at
            once, the neural echo of NB2's move from raw pixels to structured features.
 
-        ### What calcium imaging is, in plain terms
+        ### What calcium imaging is
 
         Some terms first, because the rest of the notebook is built on them.
 
-        - **Neuron firing → calcium.** When a neuron fires, calcium ions flood into the cell and the
-          internal calcium concentration spikes, then decays over a fraction of a second. Calcium is a
-          stand-in for activity: more calcium means the cell was more active, a moment ago.
+        - **Neuron firing → calcium.** When a neuron fires, its membrane voltage rises (a
+          **depolarization**). That rise opens **voltage-gated calcium channels** (VGCCs — pores in the
+          cell membrane that open specifically when the voltage rises), and calcium ions flow in down
+          their concentration gradient. The internal calcium concentration spikes, then decays over a
+          fraction of a second. Calcium is a stand-in for activity: more calcium means the cell was more
+          active, a moment ago.
         - **GCaMP.** A protein sensor expressed inside neurons that **glows brighter when it binds
-          calcium**. Because calcium tracks firing, a GCaMP cell's brightness is a proxy for its
-          activity. Filming that glow is **calcium imaging**.
+          calcium**. As calcium floods in through the VGCCs, it binds GCaMP and the molecule fluoresces
+          more strongly. Because calcium tracks firing, a GCaMP cell's brightness is a proxy for its
+          activity. Filming that glow is **calcium imaging**. The schematic below traces this chain from
+          voltage to fluorescence.
         - **Miniscope.** A miniature microscope bolted to the head of a freely moving mouse, filming a
           patch of brain tissue as a video while the animal behaves.
         - **Calcium trace.** The thing we want at the end: one number per frame describing how bright a
@@ -125,6 +131,24 @@ def _(mo):
           pixels inside it at each frame turns an image stack into a single trace.
         """
     )
+    return
+
+
+@app.cell(hide_code=True)
+def _(cu, mo):
+    import base64 as _b64
+    with open(cu.data_path("data/assets/nb07_calcium_schematic.png"), "rb") as _fh:
+        _uri = "data:image/png;base64," + _b64.b64encode(_fh.read()).decode()
+    mo.vstack([
+        mo.Html(
+            f'<div style="text-align:center"><img src="{_uri}" width="720" '
+            f'style="max-width:100%;border-radius:6px"></div>'
+        ),
+        mo.md(
+            "*A neuron's voltage rises → voltage-gated calcium channels open → Ca²⁺ flows in → it binds "
+            "GCaMP → GCaMP fluoresces. The camera reads that fluorescence as brightness.*"
+        ),
+    ])
     return
 
 
@@ -146,7 +170,7 @@ def _(mo):
         | **What is given to you** | **15 named keypoints, fixed and known** | **an unknown number of cells, unlabelled, overlapping** |
         | Pooling across animals | one fixed 19-column matrix, poolable across cages | per-session, variable cell count, **not** poolable |
 
-        The last two rows are the real difference. In Week 1 the tracker *hands* you 15 keypoints with
+        The last two rows are the real difference. In the behaviour arm the tracker *hands* you 15 keypoints with
         known names; the same 19 feature columns describe every animal, so you can stack thousands of
         events into one matrix. Here nothing hands you the "nodes." The number of neurons is unknown,
         they are not labelled, and their light lands on **overlapping** pixels, so a single pixel is a
@@ -157,7 +181,7 @@ def _(mo):
         The question this notebook answered before it (NB6, in the behaviour arm) was *can we decode
         what a mouse is doing from its movement?* The question it hands forward (NB8) is *once we have
         a population of neurons, what does each one encode, and can we read behaviour back out of
-        them?* First we have to build that population. Let us start where every recording starts: with
+        them?* First we have to build that population. We start where every recording starts: with
         a movie that will not hold still.
         """
     )
@@ -229,11 +253,26 @@ def _(F_mov, H_mov, NB07, W_mov, mo):
         the three panels sit left-to-right inside that width. Everything below reads from `raw`,
         `rigid`, and `pwr` — no more file loading.
 
-        **The helpers, stated plainly.** `nu.read_video(path, step=3, gray=True)` reads a movie into a
+        **The helpers.** `nu.read_video(path, step=3, gray=True)` reads a movie into a
         `(F, H, W)` float32 array, keeping every third frame. `nu.split_thirds(mov)` cuts the
         side-by-side frame into its three equal-width panels and crops the top/bottom so they align.
         """
     )
+    return
+
+
+@app.cell(hide_code=True)
+def _(cu, mo):
+    _gif = cu.gif_img_html(
+        open(cu.data_path("data/assets/nb07_raw_traces.gif"), "rb").read(), width=360)
+    mo.vstack([
+        mo.Html(f'<div style="text-align:center">{_gif}</div>'),
+        mo.md(
+            "*A few neurons' calcium traces drawing in over time — the sharp, asymmetric bumps are "
+            "calcium transients. Each trace is one number per frame; the projection images below "
+            "collapse the whole movie stack over time into a single summary frame instead.*"
+        ),
+    ])
     return
 
 
@@ -274,6 +313,10 @@ def _(mo, np, nu, pwr, raw):
     _m = float(np.percentile(np.abs(_diff_img), 99))
     _f_diff = nu.image_fig(_diff_img, title="std(raw) − std(pw-rigid): the motion that was removed",
                            colorscale="RdBu_r", zmin=-_m, zmax=_m, colorbar_title="Δstd", height=330)
+    # constrain width to the square image + colorbar so no empty band opens between them
+    for _f in (_f_mean, _f_std, _f_diff):
+        _f.update_layout(width=420)
+        _f.data[0].colorbar.thickness = 14
     mo.hstack([_f_mean, _f_std, _f_diff])
     return
 
@@ -290,12 +333,17 @@ def _(mo):
         **raw** it wanders, in **rigid** it steadies, in **pw-rigid** it holds most still.
 
         A single frame is a weak test — motion lives in how the image changes *over time* — so below
-        the movie we read a **fixed edge ROI's brightness over time** from all three panels. We do not
-        let you drag this box around: we place it on a **pre-vetted, high-contrast edge**, because that
-        is where the lesson is visible. (A box on a flat, featureless patch barely moves in any panel,
-        which would teach nothing.) On a bright edge, a tiny image shift changes the pixel value a lot,
-        so the **raw** trace jumps and dips — those excursions are *motion masquerading as activity* —
-        while **rigid** and especially **pw-rigid** stay on the same tissue and read smoother.
+        the movie we read an **ROI's brightness over time** from all three panels. Choose which ROI to
+        read with the selector. The two edge positions were picked from domain knowledge: they sit on
+        **high-contrast edges**, where a small image shift changes the pixel value the most, so motion is
+        maximally visible there. On such an edge the **raw** trace jumps and dips — those excursions are
+        *motion masquerading as activity* — while **rigid** and especially **pw-rigid** stay on the same
+        tissue and read smoother. The third choice is a **flat interior patch** for contrast: with little
+        structure to slide across, all three traces look nearly the same, and correction barely changes
+        anything.
+
+        The dotted vertical line on the trace marks the frame currently shown in the panels above; drag
+        the frame slider and watch it move.
         """
     )
     return
@@ -309,12 +357,30 @@ def _(F_mov, mo):
 
 
 @app.cell
-def _(H_mov, W_mov, frame_ctrl, go, mo, np, nu, pwr, raw, rigid):
+def _(mo):
+    # curated ROI positions (row y, col x) with half-width 4, vetted by scanning this 160x160 movie.
+    # The two edges give raw >> rigid > pw-rigid variance (the instructive direction); the flat patch
+    # barely changes across panels (the contrast case). label -> (ry, rx).
+    roi_choice = mo.ui.dropdown(
+        options={
+            "bright edge — raw jitters most (raw var 27 → pw-rigid 5)": "57,30",
+            "second bright edge (raw var 18 → pw-rigid 2)": "55,40",
+            "flat interior patch — correction barely matters": "80,80",
+        },
+        value="bright edge — raw jitters most (raw var 27 → pw-rigid 5)",
+        label="ROI position",
+    )
+    return (roi_choice,)
+
+
+@app.cell
+def _(frame_ctrl, go, mo, np, nu, pwr, raw, rigid, roi_choice):
     from plotly.subplots import make_subplots as _mksub
     # shared gray range across panels
     _vmin = float(np.percentile(raw, 1)); _vmax = float(np.percentile(raw, 99))
-    # curated high-contrast edge ROI (fixed): a bright cell edge near frame centre
-    _ry, _rx, _r = H_mov // 2 - 12, W_mov // 2 + 10, 4
+    # ROI chosen by the student (row y, col x), half-width r
+    _ry, _rx = (int(v) for v in roi_choice.value.split(","))
+    _r = 4
     _t = frame_ctrl.value
     _panels = [("raw", raw), ("rigid", rigid), ("pw-rigid", pwr)]
     _fig = _mksub(rows=1, cols=3, horizontal_spacing=0.02,
@@ -332,9 +398,9 @@ def _(H_mov, W_mov, frame_ctrl, go, mo, np, nu, pwr, raw, rigid):
                        line=dict(color="#00e5ff", width=2), row=1, col=_j)
     _fig.update_layout(template="plotly_white", height=320,
                        margin=dict(l=10, r=10, t=52, b=10),
-                       title=f"frame {_t}  —  raw | rigid | pw-rigid  (cyan = fixed edge ROI)")
+                       title=f"frame {_t}  —  raw | rigid | pw-rigid  (cyan = selected ROI)")
 
-    # the fixed-ROI trace over time from all three panels
+    # the selected-ROI trace over time from all three panels
     _sl = (slice(None), slice(_ry - _r, _ry + _r + 1), slice(_rx - _r, _rx + _r + 1))
     _colors = {"raw": "#e45756", "rigid": "#4c78a8", "pw-rigid": "#54a24b"}
     _tr = go.Figure()
@@ -342,11 +408,13 @@ def _(H_mov, W_mov, frame_ctrl, go, mo, np, nu, pwr, raw, rigid):
         _tr.add_scatter(y=_panel[_sl].mean(axis=(1, 2)), mode="lines", name=_name,
                         line=dict(color=_colors[_name],
                                   width=1.8 if _name == "pw-rigid" else 1.1))
+    # dotted marker at the frame currently shown in the panels above
+    _tr.add_vline(x=_t, line=dict(color="#888", width=1, dash="dot"))
     _tr.update_xaxes(title="frame")
     _tr.update_yaxes(title="mean ROI brightness (gray)")
-    nu.apply_house_style(_tr, title="fixed edge-ROI brightness over time — raw wanders, corrected steadies",
+    nu.apply_house_style(_tr, title="selected-ROI brightness over time — raw wanders, corrected steadies",
                          legend="below", height=300)
-    mo.vstack([frame_ctrl, _fig, _tr])
+    mo.vstack([mo.hstack([frame_ctrl, roi_choice]), _fig, _tr])
     return
 
 
@@ -704,7 +772,7 @@ def _(mo):
         **Python skill practised:** *array arithmetic and axis reductions, then calling a stats
         function.* You will difference an array along the time axis, reduce it to one number, and then
         run a paired test on the per-frame traces. Knowing *which axis is time* is the crux — the same
-        idea powered every velocity feature in Week 1.
+        idea powered every velocity feature in the behaviour arm.
 
         **What you have.** `raw`, `rigid`, `pwr` — the three panels, each `(F, H, W)`; `np`; and
         `nu.motion_index_trace(panel)` which returns the `(F-1,)` per-frame motion trace. Fill the two
@@ -904,6 +972,9 @@ def _(frames_clean, frames_raw, mo, nu):
                           colorscale="gray", robust=False, colorbar_title="intensity", height=430)
     _f_cl = nu.image_fig(frames_clean.mean(0), title="after masking timestamp + letterbox — tissue shows",
                          colorscale="gray", colorbar_title="intensity", height=430)
+    for _f in (_f_raw, _f_cl):
+        _f.update_layout(width=520)
+        _f.data[0].colorbar.thickness = 14
     mo.hstack([_f_raw, _f_cl], widths=[1, 1])
     return
 
@@ -957,6 +1028,9 @@ def _(bg, fg, mo, movie_t, nu):
                            colorbar_title="intensity", height=430)
     _fg_fig = nu.image_fig(fg[movie_t.value], title=f"foreground frame {movie_t.value} (z-scored)",
                            colorscale="RdBu", zmin=-3, zmax=3, colorbar_title="σ", height=430)
+    for _f in (_bg_fig, _fg_fig):
+        _f.update_layout(width=520)
+        _f.data[0].colorbar.thickness = 14
     mo.vstack([movie_t, mo.hstack([_bg_fig, _fg_fig], widths=[1, 1])])
     return
 
@@ -988,8 +1062,11 @@ def _(fg, np):
 
 @app.cell
 def _(maxproj, nu):
-    nu.image_fig(maxproj, title="max |foreground| over time — bright spots are active cells",
-                 colorscale="Inferno", colorbar_title="peak σ", height=520)
+    _f = nu.image_fig(maxproj, title="max |foreground| over time — bright spots are active cells",
+                      colorscale="Inferno", colorbar_title="peak σ", height=520)
+    _f.update_layout(width=610)
+    _f.data[0].colorbar.thickness = 14
+    _f
     return
 
 
@@ -1116,16 +1193,17 @@ def _(border_var_all, cell_var_all, gap_var_all, mo, np):
         **What the numbers actually say.** Cell boxes have median variance **{_c:.2f}**. Tissue-gap
         boxes — the dark spaces *between* the visible cells — have median variance **{_g:.2f}**: a
         cell/gap ratio of only **{_c / _g:.2f}×**. A box on empty-looking tissue fluctuates almost as
-        much as a box on a cell, because the whole tissue **co-fluctuates**: surrounding neuropil, blood
-        flow, and overall brightness make the field breathe together, and a 20×20 box averages in all
-        of it. The *only* boxes that read genuinely flat (variance ≈ **{_b:.2f}**) are the **border**
+        much as a box on a cell, because the whole tissue **co-fluctuates**: surrounding **neuropil**
+        (the dense mesh of dendrites and axons filling the space between cell bodies), blood flow, and
+        overall brightness make the field breathe together, and a 20×20 box averages in all of it. The *only* boxes that read genuinely flat (variance ≈ **{_b:.2f}**) are the **border**
         boxes — and those sit on the burned-in timestamp we blanked in B1, which is **not tissue at
         all**.
 
         This resolves a contradiction you may have seen quoted two ways: a "6× cell-vs-background
         separation" and a "~3× separation" from the *same* movie. Both are real; they just used
-        different "background." Measure a cell against the burned-in border or the dead vignette outside
-        the tissue and you get a flattering 6×; measure it against honest tissue *between* cells and the
+        different "background." Measure a cell against the burned-in border or the dead **vignette** (the
+        darkened image periphery produced by the lens optics) outside the tissue and you get a flattering
+        6×; measure it against honest tissue *between* cells and the
         ratio collapses to ~1×. **A hand-drawn rectangle cannot separate a cell from the tissue it sits
         in.** That failure is exactly the problem Part C solves: a method that learns each cell's *own
         compact shape* and pulls it out of the shared background.
@@ -1255,7 +1333,7 @@ def _(mo):
         **The method — CNMF** (constrained non-negative matrix factorization). It writes the movie
         `Y ≈ A · C`: the footprints `A` (the *where*) times the traces `C` (the *when*), plus
         background. We load a pre-computed result — one striatal session, `221007_4-0_D2` — and explore
-        it. (We do not re-run CNMF live; it is compute-heavy and the point is to read its output.)
+        it.
         """
     )
     return
@@ -1284,6 +1362,8 @@ def _(NB07, np, nu):
 def _(Cn, Fs, mo, n_frames, n_neurons, nu):
     _fig = nu.image_fig(Cn, title="Correlation image Cn — pixels that co-fluctuate with their neighbours",
                         colorscale="Viridis", colorbar_title="local corr", height=500)
+    _fig.update_layout(width=590)
+    _fig.data[0].colorbar.thickness = 14
     mo.vstack([_fig, mo.md(
         f"""**{n_neurons} neurons** across **{n_frames:,} frames** at **{Fs:.0f} fps**
         ({n_frames / Fs / 60:.1f} min). The bright rings and disks are the sources CNMF will separate
@@ -1408,6 +1488,8 @@ def _(A, img_shape, mo, np, nu):
     _mont = nu.footprint_montage(A, img_shape)
     _fig = nu.image_fig(_mont, title="Footprint montage — max projection of all 202 sources",
                         colorscale="Viridis", colorbar_title="peak-norm weight", height=500)
+    _fig.update_layout(width=590)
+    _fig.data[0].colorbar.thickness = 14
     # describe where the footprints actually are (they are NOT spread over the whole FOV)
     _An = np.asarray(A) / (np.asarray(A).max(1, keepdims=True) + 1e-9)
     _ys, _xs = [], []
@@ -1422,8 +1504,7 @@ def _(A, img_shape, mo, np, nu):
         x ≈ {_xs.min():.0f}–{_xs.max():.0f}; the middle half sit in
         y ≈ {np.percentile(_ys, 25):.0f}–{np.percentile(_ys, 75):.0f},
         x ≈ {np.percentile(_xs, 25):.0f}–{np.percentile(_xs, 75):.0f}). The bottom and right edges are
-        essentially empty. That is normal — a miniscope images a limited, illuminated patch — and it is
-        a reminder to describe what the data *shows*, not what we assume."""
+        essentially empty. That is expected — a miniscope images a limited, illuminated patch."""
     )])
     return
 
@@ -1509,7 +1590,7 @@ def _(mo):
         ## C6. Who are these 202 cells? A population profile
 
         Demixing hands us 202 sources, but they are not interchangeable. Before analysing them we
-        characterise the population — the neural echo of the feature EDA from Week 1. For each neuron we
+        characterise the population — the neural echo of the feature EDA from the behaviour arm. For each neuron we
         count **large events**: the number of times its z-scored trace crosses `z = 5` (a rising-edge
         count) over the whole recording — how often it fires strongly.
 
@@ -1651,13 +1732,13 @@ def _(mo):
         math as behaviour's PCA, but constrained so each component is a cell, not a statistical axis. A
         movie of light is now a population of per-neuron time series.
 
-        **What was the same, and what was not.** The math rhymed with Week 1 at every step — align
+        **What was the same, and what was not.** The math rhymed with the behaviour arm at every step — align
         before you read, factor structure out of a matrix. But where the pose tracker *handed* us 15
         named keypoints, here we had to **discover** an unknown number of unlabelled, overlapping cells
         and separate them, per recording. That is why the neural side needed a whole notebook to reach
         the starting line the behaviour side began from.
 
-        **The next question (NB8).** We now hold 202 clean neurons, each a time series of *when* it
+        **The next question (NB8).** We hold 202 clean neurons, each a time series of *when* it
         fires — but we do not know what any of them is *about*. Does a neuron's activity track something
         specific: the animal's position, or whether it is being social? And can we read that variable
         back out of the population — with honest cross-validation this time? That is tuning and

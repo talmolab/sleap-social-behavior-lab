@@ -55,10 +55,10 @@ def _():
 
 @app.cell
 def _(ROOT, np):
-    # Committed data bundle — replaces every runtime external fetch (CNMF Google-Drive h5, rat
-    # Dropbox zip, and the 240 MB social-isolation calcium h5). Built by tools/build_nb08_assets.py.
-    # The neural blocks are stored as int8 time-deltas of the z-scored traces (calcium is smooth, so
-    # the delta is lossless w.r.t. the int8 quantization); recon_block cumsum-decodes + dequantizes.
+    # Data bundle for this notebook: the striatal CNMF traces, the rat place/grid sessions, and the
+    # social-isolation sessions. The neural blocks are stored as int8 time-deltas of the z-scored
+    # traces (calcium is smooth, so the delta is lossless w.r.t. the int8 quantization); recon_block
+    # cumsum-decodes + dequantizes back to z-units.
     import os as _os, urllib.request as _urlreq
     _p = _os.path.join(ROOT, "data", "nb08_assets.npz")
     if not _os.path.exists(_p):                       # bare checkout (e.g. molab): pull the committed file
@@ -106,7 +106,7 @@ def _(mo):
         ## The same math, a different object
 
         The tools are the ones we already built. But the object they run on is not the same, and the
-        difference is the intellectual core of this notebook, so we state it plainly up front.
+        difference is the intellectual core of this notebook.
         """
     )
     return
@@ -144,9 +144,9 @@ def _(mo):
 @app.cell
 def _(ASSETS, np, recon_block):
     # The striatal CNMF-E session from notebook 7: 202 demixed neurons, ~16,800 frames at 30 fps.
-    # Loaded from the committed bundle (no Google-Drive fetch). C_z is the per-neuron z-scored trace
-    # matrix (n_neurons, n_frames), reconstructed from its int8 time-delta; Cn is the correlation
-    # image. The z-scored traces are the only CNMF product any figure in this notebook consumes.
+    # C_z is the per-neuron z-scored trace matrix (n_neurons, n_frames), reconstructed from its int8
+    # time-delta; Cn is the correlation image (H, W). The z-scored traces are the only CNMF product
+    # any figure in this notebook consumes.
     C_z = recon_block(ASSETS["cz_delta"], float(ASSETS["cz_lo"]), float(ASSETS["cz_hi"]), axis=1)
     Cn = ASSETS["Cn"].astype(np.float32)            # correlation image (H, W)
     Fs = float(ASSETS["Fs"])
@@ -169,16 +169,17 @@ def _(Fs, mo, n_frames, n_neurons):
         name where it came from. In notebook 7 we ran **CNMF** (constrained non-negative matrix
         factorization) on the raw calcium movie of a striatal session and pulled out
         **{n_neurons} neurons**: a spatial **footprint** for each cell (the *where*) and a calcium
-        **trace** for each cell (the *when*). We now work with those traces.
+        **trace** for each cell (the *when*). Those traces are the input here.
 
         **Definitions.**
 
         - **Calcium trace:** one neuron's brightness over time. It rises sharply when the cell fires
           (calcium floods in) and decays slowly afterward.
         - **Population raster:** a heatmap with **one row per neuron** and **one column per time
-          frame**; color is that neuron's activity (here z-scored, so every cell is on the same
-          scale). Bright vertical smears are moments when many cells fire together; horizontal streaks
-          are individual cells active for a while.
+          frame**; color is that neuron's activity (here **z-scored** — each cell's trace has its mean
+          subtracted and is divided by its standard deviation, so every cell is on the same scale, in
+          units of standard deviations from its own mean). Bright vertical smears are moments when many
+          cells fire together; horizontal streaks are individual cells active for a while.
 
         The raster below is the whole population — **{n_neurons} neurons × {n_frames:,} frames** at
         **{Fs:.0f} fps** ({n_frames / Fs / 60:.1f} min). The **contrast ceiling** slider sets the
@@ -286,8 +287,8 @@ def _(mo):
 
 @app.cell
 def _(ASSETS, np):
-    # Rat place/grid sessions from the committed bundle (no Dropbox fetch). Each: centroid (T,2) and
-    # spike counts (T, n_neurons) — the two arrays every rate-map / SI / gridness plot consumes.
+    # Rat place/grid sessions. Each holds centroid (T, 2) and spike counts (T, n_neurons) — the two
+    # arrays every rate-map / SI / gridness plot consumes.
     rat_names = [str(x) for x in ASSETS["rat_names"]]
     rat_sessions = {name: {"centroid": ASSETS[f"rat_centroid_{i}"].astype(np.float32),
                            "spikes": ASSETS[f"rat_spikes_{i}"]}
@@ -322,9 +323,9 @@ def _(mo, rat_names):
 
 @app.cell
 def _(mo, rat_session_pick, rat_sessions):
-    # Neuron slider whose MAX tracks the selected session's neuron count, so it can never silently
-    # clamp to the last neuron on a 5- or 6-neuron session (the old bug). Recreated when the session
-    # changes; the default lands on a known place-like cell in the 14-neuron session.
+    # Neuron slider whose max tracks the selected session's neuron count, so it never clamps to the
+    # last neuron on a 5- or 6-neuron session. The default lands on a known place-like cell in the
+    # 14-neuron session.
     _nmax = rat_sessions[rat_session_pick.value]["spikes"].shape[1] - 1
     rat_neuron = mo.ui.slider(0, _nmax, value=min(5, _nmax), step=1,
                               label=f"neuron (0–{_nmax} in this session)",
@@ -444,8 +445,8 @@ def _(mo):
         ### Which neurons are trustworthy? — SI vs spike count
 
         The scatter below plots every neuron by its **spike count** (x, log scale) and its **SI** (y),
-        and — instead of redundantly coloring by SI again — colors each point by whether it **beats its
-        own spike-matched shuffle** (green = passes, gray = fails). A trustworthy place cell sits to the
+        and colors each point by whether it **beats its own spike-matched shuffle** (green = passes,
+        gray = fails). A trustworthy place cell sits to the
         **right** (many spikes) and **high** (large SI) and is green. A point that is high but far
         **left** (large SI, very few spikes) is the danger zone: a big number a few lucky spikes
         manufactured — and it comes out gray. Hover any point.
@@ -456,8 +457,9 @@ def _(mo):
 
 @app.cell
 def _(go, np, nu, rat_session_pick, rat_sessions):
-    # SI vs spike count, colored by shuffle pass/fail (not a redundant SI colorbar). Each neuron gets
-    # a spike-matched circular-shift null; "passes" = observed SI above its own 95th percentile.
+    # SI vs spike count, colored by shuffle pass/fail (green = beats its own shuffle, gray = fails).
+    # Each neuron gets a spike-matched circular-shift null; "passes" = observed SI above its own 95th
+    # percentile.
     _d = rat_sessions[rat_session_pick.value]
     _ctr, _spk = _d["centroid"], _d["spikes"]
     def _si_of(_col):
@@ -498,9 +500,11 @@ def _(mo):
         fired in only ~80 frames, and it comes out **gray**: its high number is exactly what
         position-scrambled spikes produce. **Neuron 5** is high *and* well to the right (~1.26
         bits/spike from ~1,100 spike-frames) and comes out **green** — a genuine field. The plot below
-        makes that comparison concrete: each neuron scored against its **own** null on a common
-        normalized axis (so a loud cell and a quiet one are comparable), using
-        `nu.per_neuron_normalized_shuffle`.
+        makes that comparison concrete. Each of the two cells is scored against its own circular-shift
+        null and reported as a **z-score** — the number of standard deviations the observed SI sits
+        above the mean of that null. Reporting a z-score rather than the raw SI puts a highly active
+        cell and a quiet one on one common axis, so the comparison no longer runs on the raw bits/spike
+        axis where neuron 10's larger raw value would falsely look like the strongest place cell.
         """
     )
     return
@@ -508,10 +512,13 @@ def _(mo):
 
 @app.cell
 def _(np, nu, rat_sessions):
-    # Per-neuron-normalized shuffle for the two canonical cells: n5 (real) vs n10 (sparsity artifact).
-    # Each is scored against ITS OWN circular-shift null and reported as a z vs that null, so the
-    # comparison lands on a common axis rather than a shared ABSOLUTE SI axis (where n10's raw 2.14
-    # would look "best").
+    # Score two canonical cells — neuron 5 (a real place cell) and neuron 10 (a sparsity artifact) —
+    # each against its OWN circular-shift null: cyclically slide the spike train by a random offset,
+    # which keeps the spike count but pairs the spikes with the wrong positions, and re-score; 50 such
+    # shifts form that cell's chance distribution. Report each observed SI as a z-score — how many
+    # standard deviations it sits above the mean of its own null. Reporting each cell relative to its
+    # own null puts a loud cell and a quiet cell on one common (normalized) axis, so the comparison no
+    # longer runs on the raw bits/spike axis where neuron 10's larger raw SI (~2.14) would rank first.
     _d = rat_sessions["20160609T194655.mat"]
     _ctr, _spk = _d["centroid"], _d["spikes"]
     def _si_of(_col):
@@ -531,6 +538,10 @@ def _(np, nu, rat_sessions):
         title=(f"neuron 5 (real): z = {_res['z'][0]:.1f}, p = {nu.fmt_p(_res['p'][0])}   ·   "
                f"neuron 10 (artifact): z = {_res['z'][1]:.1f}, p = {nu.fmt_p(_res['p'][1])}"),
         height=420)
+    # Two categories: pin the x-axis so they sit as two adjacent columns instead of being auto-ranged
+    # to opposite edges of the wide plot. Drop the legend — the x tick labels already name the cells.
+    _fig.update_xaxes(range=[-0.6, 1.6])
+    _fig.update_layout(showlegend=False)
     _fig.add_hline(y=1.64, line=dict(color="#e45756", width=2, dash="dash"),
                    annotation_text="95th-pct of own null (z≈1.64)", annotation_position="top left")
     _fig
@@ -557,10 +568,10 @@ def _(mo):
 
         This section is a deliberate warning about reading a picture too eagerly. The autocorrelogram
         below often shows a **ring of satellite peaks even for a plain place cell** — an artifact of the
-        arena border and the single-field shape, not a grid. So we do two things the old version did
-        not: we give the figure a **neutral** title (no "this is / is not a grid"), and we compute a
-        quantitative **gridness score** — `nu.gridness_score`, the standard 60°-symmetry statistic:
-        it correlates the ring with rotated copies of itself and returns
+        arena border and the single-field shape, not a grid. The figure carries a **neutral** title (it
+        does not assert grid or not-grid), and it reports a quantitative **gridness score** —
+        `nu.gridness_score`, the standard 60°-symmetry statistic: it correlates the ring with rotated
+        copies of itself and returns
         $\min(\text{corr}@60°,@120°) - \max(@30°,@90°,@150°)$, which is $>0$ for a hexagonal lattice.
         """
     )
@@ -768,12 +779,11 @@ def _(mo):
 
 @app.cell
 def _(ASSETS, recon_block):
-    # Social-isolation dataset from the committed bundle (no fetch; the raw ~240 MB calcium file is
-    # NEVER stored). Each session's neural block is already resample->zscore->crop'd exactly as the
-    # runtime pipeline did — preserving the order every pinned number depends on — and stored as an
-    # int8 time-delta; sess_neurons_all[s] is (T_crop, n_cells) z-scored, sess_social_all[s] is the
-    # (T_crop,) is_social_sender label. cond_labels drive the dropdown; both lists drive every SI
-    # figure and the run_all-gated 18-session blocked-CV compute.
+    # Social-isolation dataset. Each session's neural block is already resample->zscore->crop'd in that
+    # exact order (every pinned number depends on it) and stored as an int8 time-delta; sess_neurons_all[s]
+    # is (T_crop, n_cells) z-scored, sess_social_all[s] is the (T_crop,) is_social_sender label.
+    # cond_labels drive the dropdown; both lists drive every SI figure and the run_all-gated 18-session
+    # blocked-CV compute.
     cond_labels = [str(x) for x in ASSETS["si_cond_labels"]]
     n_sessions = int(ASSETS["si_n_sessions"])
     _lo, _hi = float(ASSETS["si_lo"]), float(ASSETS["si_hi"])
@@ -821,8 +831,7 @@ def _(mo):
         **social** and **non-social** frames and draw the two **empirical cumulative distributions
         (ECDFs)**. An ECDF at value $v$ is the fraction of frames at or below $v$; if the social curve
         sits to the *right* of the non-social curve, the neuron is more active during social frames.
-        (An ECDF is the right chart here — with ~4,500 frames and a small shift, a smoothed violin
-        would hide the effect.) The title reports the summary the next step thresholds on: the ratio of
+        The title reports the summary the next step thresholds on: the ratio of
         mean absolute activity in social vs non-social frames. Slide through the neurons and watch which
         ones separate — most barely do, which is the point that motivates the population decoder.
         """
@@ -908,8 +917,7 @@ def _(mo):
         but with its shipped threshold it is <b>degenerate</b>: it flags roughly the <i>entire</i>
         population — 167 of 218 neurons in this session, and 202/202, 266/289, 395/396 in others. A
         criterion that calls almost every cell "social" carries no information. This is a small, real
-        example of a badly-calibrated test, and the reason we do not offer it as an interactive default:
-        a control should not let you land on a degenerate answer by accident. The honest count depends
+        example of a badly-calibrated test. The honest count depends
         on the criterion (<code>ratio</code>, <code>delta</code>, and a fixed percentile disagree), and
         the right response is to state which criterion you used and why — not to pick the one that gives
         the biggest number.
@@ -935,9 +943,10 @@ def _(mo):
         event — the moment the arena partner enters — around which to look.
 
         **Definition.** When a sequence is present and we sort the neurons by *when* they first fire,
-        the raster's activity collapses onto a **diagonal**: early cells at the top, late cells at
-        the bottom (plotly draws row 0 at the bottom, so the earliest-firing rows land highest). `nu.sequence_sort` returns that ordering (each neuron's first supra-threshold frame,
-        argsorted). The **left** panel shows a window in raw CNMF order; the **right** shows the same
+        the raster's activity collapses onto a **diagonal**: the earliest-firing cells at the top, the
+        latest at the bottom. `nu.sequence_sort` returns that ordering (each neuron's first
+        supra-threshold frame, argsorted). The **left** panel shows a window in raw CNMF order; the
+        **right** shows the same
         window sorted. Each title reports a **sequenceness** score — the absolute Spearman correlation
         between a neuron's row position and its first-activation frame — 0 = no order, 1 = perfect
         diagonal.

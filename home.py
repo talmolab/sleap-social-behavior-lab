@@ -22,7 +22,7 @@ def _(mo):
         **Work through the lessons in order.** Each one opens as a live notebook: drag a slider or
         edit an input and the analysis re-runs instantly. Your session is private to you.
 
-        **Week 1 — Behavior.**
+        **Week 1 — Behavior (lessons 01–05).**
 
         | # | Lesson | What you build |
         |---|--------|----------------|
@@ -31,13 +31,15 @@ def _(mo):
         | 3 | [Behavior in Time](/03) | Distributions, wavelet rhythm, and who-leads-whom coordination |
         | 4 | [Collapsing to a Manifold](/04) | PCA, the UMAP objective, and a clustered map of behavioral syllables |
         | 5 | [How Analyses Mislead](/05) | The statistics that keep you honest: pseudoreplication, multiple comparisons, circular analysis, and CV leakage |
-        | 6 | [Dynamics & Decoding](/06) | The transition grammar in time, then a decoder tested across cohorts |
 
-        **Week 2 — From behavior to the brain.** The same computational moves — matrix factorization,
-        manifolds, decoding — now on miniscope and two-photon neural recordings.
+        **Week 2 — Dynamics, decoding, and the neural basis (lessons 06–08).** Week 2 opens on the
+        transition grammar of behavior in time and a decoder tested across cohorts (lesson 06), then
+        turns to the brain: the same computational moves — matrix factorization, manifolds, decoding —
+        now on miniscope and two-photon neural recordings.
 
         | # | Lesson | What you build |
         |---|--------|----------------|
+        | 6 | [Dynamics & Decoding](/06) | The transition grammar in time, then a decoder tested across cohorts |
         | 7 | [From Movie to Traces](/07) | Motion-correct a miniscope movie, then demix it into per-neuron footprints and calcium traces (CNMF) |
         | 8 | [Reading the Population](/08) | Spatial tuning, a firing sequence, and a population decoder that reads social state off the neurons |
 

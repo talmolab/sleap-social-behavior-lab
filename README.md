@@ -16,10 +16,11 @@ giving you a **sex** axis, a dominance-**rank** axis (Dom / Mid / Sub), and an e
 ## What you'll build
 
 The course runs as **eight** reactive notebooks — six on behavior, two on neural
-data. Each row links straight to a free [molab](https://molab.marimo.io) cloud kernel — click **Run**
-to open that lesson in the browser (nothing to install; each notebook self-bootstraps its data).
+data — split across two weeks of at most five lessons each. Each row links straight to a free
+[molab](https://molab.marimo.io) cloud kernel — click **Run** to open that lesson in the browser
+(nothing to install; each notebook self-bootstraps its data).
 
-**Week 1 — Behavior.**
+**Week 1 — Behavior (notebooks 01–05).**
 
 | # | Notebook | You learn | You produce | Run |
 |---|----------|-----------|-------------|-----|
@@ -28,21 +29,22 @@ to open that lesson in the browser (nothing to install; each notebook self-boots
 | 03 | `03_behavior_in_time` | Reading the signal in value, **time & frequency** (Morlet wavelet), and **who-leads-whom** coordination | A rhythm spectrogram + a shuffle-tested coordination estimate | [Run](https://molab.marimo.io/github/talmolab/sleap-social-behavior-lab/blob/main/notebooks/03_behavior_in_time.py) |
 | 04 | `04_collapsing_to_a_manifold` | **PCA** → the UMAP **objective** → a clustered map of behavioral **syllables**; why linear axes run out and you need a nonlinear map | The behavioral manifold and data-driven syllables, with the tracking-artifact outliers flagged | [Run](https://molab.marimo.io/github/talmolab/sleap-social-behavior-lab/blob/main/notebooks/04_collapsing_to_a_manifold.py) |
 | 05 | `05_how_analyses_mislead` | **Honest statistics** as visual failures on real data: unit-of-analysis / pseudoreplication, multiple comparisons, circular analysis, and cross-validation leakage | A cage-level test with a positive *and* negative control, and the leaky-vs-honest decoder comparison | [Run](https://molab.marimo.io/github/talmolab/sleap-social-behavior-lab/blob/main/notebooks/05_how_analyses_mislead.py) |
-| 06 | `06_dynamics_and_decoding` | The **transition grammar** (Markov) in time, then **decoding** behavior with cross-validation and a leave-one-cohort-out test | A transition matrix + a decoder validated across cohorts | [Run](https://molab.marimo.io/github/talmolab/sleap-social-behavior-lab/blob/main/notebooks/06_dynamics_and_decoding.py) |
 
 Each notebook defines the terms a newcomer needs, explains **why** we use each method, and asks the
 question the next notebook answers.
 
-## Week 2 — From behavior to the brain (notebooks 07–08)
+## Week 2 — Dynamics, decoding, and the neural basis (notebooks 06–08)
 
-Week 2 reuses Week 1's computational moves — matrix factorization, manifolds, decoding — on neural
-recordings. The **same math** that read behavior now reads neural populations; the twist is that
-behavior hands you a fixed 15 keypoints, whereas a recording hands you an unknown, variable number of
-neurons you must **demix**. (These notebooks ship their display data in the bundle, so they run
-offline with no external downloads.)
+Week 2 opens on behavior — the **transition grammar** of behavior in time and a **decoder** validated
+across cohorts (notebook 06) — then turns to the brain. Notebooks 07–08 reuse the same computational
+moves — matrix factorization, manifolds, decoding — on neural recordings. The **same math** that read
+behavior now reads neural populations; the twist is that behavior hands you a fixed 15 keypoints,
+whereas a recording hands you an unknown, variable number of neurons you must **demix**. (The neural
+notebooks ship their display data in the bundle, so they run offline with no external downloads.)
 
 | # | Notebook | What it does | Run |
 |---|----------|--------------|-----|
+| 06 | `06_dynamics_and_decoding` | The **transition grammar** (Markov) in time, then **decoding** behavior with cross-validation and a leave-one-cohort-out test — a transition matrix plus a decoder validated across cohorts | [Run](https://molab.marimo.io/github/talmolab/sleap-social-behavior-lab/blob/main/notebooks/06_dynamics_and_decoding.py) |
 | 07 | `07_from_movie_to_traces` | Motion-correct a miniscope movie (raw → rigid → piecewise-rigid), then **CNMF** demixes it into per-neuron footprints + calcium traces — the neural twin of NB1–2 | [Run](https://molab.marimo.io/github/talmolab/sleap-social-behavior-lab/blob/main/notebooks/07_from_movie_to_traces.py) |
 | 08 | `08_reading_the_population` | Spatial tuning (place cells + a gridness check), a firing **sequence**, and a population **decoder** that reads social state off the neurons — the neural twin of NB4 & NB6 | [Run](https://molab.marimo.io/github/talmolab/sleap-social-behavior-lab/blob/main/notebooks/08_reading_the_population.py) |
 
@@ -95,7 +97,7 @@ Small, self-contained, no video required (everything renders skeletons on a blan
 - `cohort_meta.csv` — per-cage metadata (cohort, sex, rank order, condition).
 - `raw_slp/example_*.slp` — a few short real SLEAP clips for notebook 01.
 - `nb07_assets.npz`, `nb08_assets.npz` — precomputed neural display data (motion-corrected movie
-  frames, CNMF footprints/traces, place-cell rate-map inputs) so the Week-2 notebooks run offline
+  frames, CNMF footprints/traces, place-cell rate-map inputs) so the neural notebooks run offline
   with no external downloads.
 
 ## Provenance (instructors)

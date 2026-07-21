@@ -88,11 +88,6 @@ def _(mo):
         3. **Do two mice move together, and can that tell us who is interacting with whom?**
            (*coordination* between animals)
 
-        A second, quieter thread runs through the notebook: **choosing the right picture for the data.**
-        A distribution, a redundancy, a rhythm, and a coordination each want a different chart, and the
-        wrong choice can hide a real effect or manufacture a fake one. We flag that choice each time it
-        comes up.
-
         Along the way we practice one Python skill: **writing a small function** that uses **`np.diff`**
         to turn positions into motion, the vectorized way (no Python loop over frames).
         """
@@ -691,6 +686,103 @@ def _(mo):
         for horizontal sharpness. The default `w0 = 6` is the conventional middle ground.
         """
     )
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(
+        r"""
+        ### What a Morlet wavelet actually looks like
+
+        Before sliding it, look at the template itself. A **Morlet wavelet** is an ordinary oscillation
+        (a cosine and its quarter-turn partner, a sine) multiplied by a **Gaussian bell** — a smooth hump
+        that rises from zero, peaks, and falls back to zero. The bell **fades the oscillation in and out**,
+        so the wavelet is non-zero only for a short stretch of time: it is *local*, unlike a plain sine
+        wave that runs forever. That locality is the whole point — it lets the template ask "is *this*
+        rhythm present *right here*?" rather than "is this rhythm present *somewhere in the clip*?"
+
+        The figure shows one wavelet tuned to **5 Hz**. Two knobs define it:
+
+        - **frequency** — how many full oscillations fit into one second. A higher-frequency wavelet packs
+          more wiggles into the same bell.
+        - **`w0`** — how many oscillations the bell lets through before fading out. It sets the *width* of
+          the bell relative to the oscillation, and it is exactly the `w0` you adjust with the slider
+          below. A larger `w0` admits more cycles, making the template longer in time.
+
+        The complex wavelet carries a **real part** (the cosine, in orange) and an **imaginary part** (the
+        sine, in purple, a quarter-cycle shifted). Using both lets the transform measure how strongly a
+        rhythm is present regardless of where its peaks happen to land. This exact template is what gets
+        slid along the speed signal to build one row of the spectrogram.
+        """
+    )
+    return
+
+
+@app.cell
+def _(cu, go, mo, np):
+    # Reproduce the engine's own Morlet kernel (cu.wavelet_power) exactly, for one frequency, so the
+    # picture matches the transform used everywhere below.
+    _f = 5.0                                              # wavelet frequency (Hz)
+    _w0 = 6.0                                             # oscillations admitted by the Gaussian bell
+    _dt = 1.0 / cu.FPS
+    _s = _w0 / (2 * np.pi * _f) / _dt                     # wavelet scale in samples
+    _n = int(np.ceil(_s * 6))
+    _tt = np.arange(-_n, _n + 1)
+    _tsec = _tt / cu.FPS                                  # kernel time axis in seconds
+    _psi = np.exp(1j * _w0 * _tt / _s) * np.exp(-0.5 * (_tt / _s) ** 2)
+    _psi = _psi / (np.sqrt(_s) * np.pi ** 0.25)           # same energy normalization as the engine
+    _env = np.exp(-0.5 * (_tt / _s) ** 2) / (np.sqrt(_s) * np.pi ** 0.25)   # the Gaussian bell |ψ|
+    _fig = go.Figure()
+    _fig.add_scatter(x=_tsec, y=_env, mode="lines", line=dict(color="rgba(0,0,0,0)"),
+                     fill="tozeroy", fillcolor="rgba(150,150,150,0.30)", name="Gaussian bell (envelope)")
+    _fig.add_scatter(x=_tsec, y=-_env, mode="lines", line=dict(color="rgba(0,0,0,0)"),
+                     fill="tozeroy", fillcolor="rgba(150,150,150,0.30)", showlegend=False)
+    _fig.add_scatter(x=_tsec, y=_psi.real, mode="lines", line=dict(color="#e08214", width=2.5),
+                     name="real part (a cosine)")
+    _fig.add_scatter(x=_tsec, y=_psi.imag, mode="lines", line=dict(color="#7b3294", width=2, dash="dash"),
+                     name="imaginary part (a sine)")
+    _fig.update_layout(template="plotly_white", height=320, font=dict(size=14),
+                       title="A Morlet wavelet at 5 Hz (w0 = 6)",
+                       xaxis_title="time (s)", yaxis_title="amplitude",
+                       margin=dict(l=10, r=10, t=54, b=10),
+                       legend=dict(orientation="h", y=1.02, yanchor="bottom", x=0))
+    _fig.update_xaxes(showgrid=False, range=[-0.75, 0.75]); _fig.update_yaxes(showgrid=False)
+    mo.vstack([_fig, mo.md(
+        "The oscillation is strongest at the centre of the bell and fades to nothing at its edges. Count "
+        "the orange humps under the bell: raising the **frequency** would add more; raising **`w0`** would "
+        "widen the bell to admit more of them.")])
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(
+        r"""
+        ### Sliding the wavelet along a signal
+
+        To measure rhythm at every moment, the wavelet is **slid** step by step along the signal. At each
+        position the template is multiplied against the signal underneath it and the products are summed —
+        a large result where the signal's local ups and downs line up with the template's, a small result
+        where they do not. The animation makes this concrete on a plain sine wave: the orange wavelet
+        travels left to right across the grey signal (top), and the **response** it produces is drawn
+        underneath as it goes (bottom). The response is largest where the template's frequency matches the
+        signal's local rhythm. Sweeping this for one frequency traces out **one horizontal row** of the
+        spectrogram; repeating across many frequencies stacks the rows into the full heatmap below.
+        """
+    )
+    return
+
+
+@app.cell
+def _(ROOT, cu, mo):
+    _slide = open(cu.data_path("data/assets/nb03_morlet_slide.gif", ROOT), "rb").read()
+    mo.vstack([
+        mo.Html(cu.gif_img_html(_slide, width=440)),
+        mo.md("The wavelet (orange) slides across the signal (grey); the running response (blue) peaks "
+              "when the template lines up with the signal's rhythm. That peak is what a single spectrogram "
+              "pixel records."),
+    ])
     return
 
 
@@ -1408,44 +1500,113 @@ def _(mo):
         r"""
         ### Optional deeper section — Granger causality
 
-        **Why include it.** Cross-correlation asks *when* two traces align. **Granger causality** asks a
+        **What it asks.** Cross-correlation asks *when* two traces align. **Granger causality** asks a
         sharper question: does knowing the **past of mouse A** improve our prediction of **mouse B's next
-        step**, beyond what B's own past already tells us? If it does, we say A "Granger-causes" B.
+        step**, beyond what B's own past already tells us? Concretely, it fits two forecasts of B — one
+        using only B's own recent history, one adding A's recent history — and checks whether adding A
+        measurably shrinks the prediction error. If it does, we say A "Granger-causes" B.
+
+        **What Granger adds over plain correlation.** Pearson correlation `r` and Granger answer different
+        questions, and the difference is the reason to reach for Granger at all:
+
+        - **Direction.** Correlation is **symmetric**: `r(A, B)` equals `r(B, A)`, so it is a single number
+          that says nothing about who leads. Granger produces **two separate numbers** — one for A→B and
+          one for B→A — which can be wildly different, so it can say *which* series drives the other.
+        - **Future given past.** Correlation measures **simultaneous** co-movement: whether A and B are up
+          and down at the *same instant*. Granger measures whether one series' **past** reduces the other's
+          **future** prediction error, after that series' own past is already accounted for. It is about
+          prediction across time, not agreement within a frame.
+        - **A shared blind spot.** Both are fooled by a **common cause**. If a third factor drives A and B
+          together, correlation is high and Granger can also fire, even though neither series drives the
+          other.
+
+        Each direction is summarized by an **F-statistic**: larger F means A's past explains more of the
+        left-over variance in B's future, and the associated **p-value** is the chance of seeing an F that
+        large if A's past truly added nothing. A small p therefore points to a **predictive** relationship,
+        not a proven physical cause.
 
         - **Function:** `cu.granger_pair(x, y, lags=4)` (pure numpy, no `statsmodels`).
         - **Inputs:** two speed traces and how many past frames to use.
-        - **Outputs:** an F-statistic and p-value for each direction (A→B and B→A). A small p-value
-          suggests directed influence.
+        - **Outputs:** an F-statistic and p-value for each direction (A→B and B→A).
+
+        The figure below makes the correlation-versus-Granger difference concrete on two constructed
+        signals where the two measures **disagree**.
         """
     )
     return
 
 
-@app.cell(hide_code=True)
-def _(EXAMPLE, cr, cu, kp, mo, pre_speeds):
-    _x, _y = pre_speeds(kp, cr, EXAMPLE)
-    try:
-        _g = cu.granger_pair(_x, _y, lags=4)
-        _txt = (f"Example event #{EXAMPLE}: approacher→approachee F = {_g['f_xy']:.2f} "
-                f"(p = {cu.fmt_p(_g['p_xy'])}); approachee→approacher F = {_g['f_yx']:.2f} "
-                f"(p = {cu.fmt_p(_g['p_yx'])}).")
-    except Exception as _e:
-        _txt = f"(Granger skipped: {_e})"
-    mo.accordion({
-        "Granger on the example event, with the caveat": mo.md(
-            rf"""
-            {_txt}
+@app.cell
+def _(EXAMPLE, cr, cu, go, kp, make_subplots, mo, np, pre_speeds):
+    # Two constructed scenarios that share a HIGH correlation but differ under Granger, plus the real
+    # example event. All F-values come straight from cu.granger_pair.
+    _rng = np.random.RandomState(0)
+    _N = 300
+    # (i) lagged driver: A is a random walk; B is A delayed by 3 frames + noise. A's PAST predicts B.
+    _base = np.cumsum(_rng.randn(_N))
+    _A = _base + 0.5 * _rng.randn(_N)
+    _B = np.roll(_base, 3) + 0.5 * _rng.randn(_N)
+    # (ii) common cause: X and Y share an instantaneous (white-noise) input, so they co-move but neither
+    # PAST predicts the other — the classic case where correlation and Granger part ways.
+    _c = _rng.randn(_N)
+    _Xc = _c + 0.2 * _rng.randn(_N)
+    _Yc = _c + 0.2 * _rng.randn(_N)
+    _gl = cu.granger_pair(_A, _B, lags=4)
+    _gc = cu.granger_pair(_Xc, _Yc, lags=4)
+    # (iii) real example event, pre-contact approacher & approachee speeds.
+    _xr, _yr = pre_speeds(kp, cr, EXAMPLE)
+    _gr = cu.granger_pair(_xr, _yr, lags=4)
+    _groups = ["lagged driver<br>(A delayed → B)", "common cause<br>(shared input)",
+               f"real event #{EXAMPLE}<br>(pre-contact)"]
+    _rvals = [abs(float(np.corrcoef(_A, _B)[0, 1])), abs(float(np.corrcoef(_Xc, _Yc)[0, 1])),
+              abs(float(np.corrcoef(_xr, _yr)[0, 1]))]
+    _fwd = [_gl["f_xy"], _gc["f_xy"], _gr["f_xy"]]         # A→B / X→Y / approacher→approachee
+    _bwd = [_gl["f_yx"], _gc["f_yx"], _gr["f_yx"]]         # reverse direction
+    _fig = make_subplots(rows=1, cols=2, column_widths=[0.42, 0.58], horizontal_spacing=0.13,
+                         subplot_titles=("Pearson |r| — symmetric",
+                                         "Granger F — directional (log scale)"))
+    _fig.add_bar(x=_groups, y=_rvals, marker_color="#7b3294", showlegend=False, row=1, col=1,
+                 text=[f"{v:.2f}" for v in _rvals], textposition="outside", cliponaxis=False)
+    _fig.add_bar(x=_groups, y=_fwd, name="forward (1 → 2)", marker_color="#e08214", row=1, col=2,
+                 text=[f"{v:.1f}" for v in _fwd], textposition="outside", cliponaxis=False)
+    _fig.add_bar(x=_groups, y=_bwd, name="reverse (2 → 1)", marker_color="#4c78a8", row=1, col=2,
+                 text=[f"{v:.1f}" for v in _bwd], textposition="outside", cliponaxis=False)
+    _fig.add_hline(y=2.5, line=dict(color="#333", dash="dash"), row=1, col=2,
+                   annotation_text="p = 0.05 threshold", annotation_position="bottom right")
+    _fig.update_yaxes(range=[0, 1.18], title_text="|correlation|", row=1, col=1, showgrid=False)
+    _fig.update_yaxes(type="log", title_text="Granger F-statistic", row=1, col=2, showgrid=False,
+                      range=[-1.05, 2.55], tickvals=[0.1, 1, 2.5, 10, 100],
+                      ticktext=["0.1", "1", "2.5", "10", "100"])
+    _fig.update_xaxes(showgrid=False)
+    _fig.update_layout(template="plotly_white", height=460, font=dict(size=13), barmode="group",
+                       margin=dict(l=10, r=10, t=80, b=10),
+                       legend=dict(orientation="h", y=1.13, yanchor="bottom", x=0.55, xanchor="center"))
+    mo.vstack([_fig, mo.md(
+        f"**Left:** correlation cannot tell the two constructed scenarios apart — the lagged driver and "
+        f"the common cause both sit near **|r| ≈ 0.95**. **Right:** Granger separates them. The lagged "
+        f"driver has one bar towering over the p = 0.05 threshold in the **forward** direction "
+        f"(F ≈ {_fwd[0]:.0f}) and nothing in reverse (F ≈ {_bwd[0]:.1f}) — Granger recovers *who drives "
+        f"whom*. The common cause stays **below threshold in both directions** (F ≈ {_fwd[1]:.1f} and "
+        f"{_bwd[1]:.1f}): the two series move together right now, but neither's past predicts the other's "
+        f"future. The real example event #{EXAMPLE} is null both ways (F ≈ {_fwd[2]:.1f} and {_bwd[2]:.1f}), "
+        "consistent with the earlier finding that no leader is recoverable on these short pre-contact "
+        "windows.")])
+    return
 
-            **The common-cause caveat.** Granger measures **prediction, not cause**. Both mice can be
-            driven by a **shared third factor** — the bystander, or a common startle — which makes A look
-            like it drives B when neither actually does. Bivariate Granger is also not *conditional*: to
-            move from "A predicts B" to "A predicts B *given the bystander*," you would add the third
-            mouse's trace as an extra input (a conditional, multivariate model). On 1-second,
-            nonstationary windows, treat any single-event Granger number as a hint, not a verdict — the
-            same lesson the who-leads test taught us.
-            """
-        )
-    })
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(
+        r"""
+        **The common-cause caveat.** As the middle column warns, Granger measures **prediction, not
+        cause**. Two mice can both be driven by a **shared third factor** — the bystander, or a common
+        startle — which can make one look like it drives the other when neither does. Bivariate Granger is
+        also not *conditional*: to move from "A predicts B" to "A predicts B *given the bystander*," you
+        would add the third mouse's trace as an extra input (a conditional, multivariate model). On the
+        1-second, nonstationary windows these clips provide, treat any single-event Granger number as a
+        hint, not a verdict — the same lesson the who-leads test taught.
+        """
+    )
     return
 
 

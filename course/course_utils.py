@@ -566,7 +566,7 @@ def _event_bbox(kp_event, pad=40):
 def render_frames(kp_event, ranks, contact_rel=0, cell=200, arrow=True):
     """kp_event (T,3,15,2) world coords ordered [appr,appe,by]; ranks (3,). Draw the rank-colored
     skeletons on a blank canvas (no video needed) and return a list of (cell,cell,3) uint8 frames.
-    A white arrow points approacher->approachee; a red dot marks frames at/after contact onset."""
+    A black arrow points approacher->approachee; a red dot marks frames at/after contact onset."""
     from PIL import Image, ImageDraw
     T = kp_event.shape[0]
     x0, y0, sx, sy = _event_bbox(kp_event)
@@ -594,7 +594,7 @@ def render_frames(kp_event, ranks, contact_rel=0, cell=200, arrow=True):
             ca = _centroids(kp_event[t:t + 1, 0])[0]
             cb = _centroids(kp_event[t:t + 1, 1])[0]
             if np.isfinite(ca).all() and np.isfinite(cb).all():
-                dr.line([to_px(ca), to_px(cb)], fill=(255, 255, 255), width=2)
+                dr.line([to_px(ca), to_px(cb)], fill=(20, 20, 20), width=2)
         if t >= contact_rel:
             dr.ellipse([cell - 16, 6, cell - 6, 16], fill=(220, 40, 40))
         frames.append(np.asarray(img))
@@ -1505,6 +1505,146 @@ def umap_objective_layout_fig(toy, snapshot=-1, title=None, height=460):
                       title=title or f"UMAP toy layout — epoch {ep}",
                       margin=dict(l=10, r=10, t=50, b=10))
     fig.update_xaxes(showticklabels=False); fig.update_yaxes(showticklabels=False)
+    return fig
+
+
+def umap_toy_3point(dim=10, near_sep=1.0, far_sep=8.0, n_iter=80, lr=1.0,
+                    snapshot_every=10, seed=0):
+    """The smallest hand-followable version of `umap_objective_toy`: EXACTLY THREE points living in
+    `dim`-D space, so a notebook can quote every number.
+
+    Geometry (deterministic, no randomness in the high-D coordinates):
+        point 0 at the origin,
+        point 1 at `near_sep` along axis 0   -> a genuine NEIGHBOR of point 0,
+        point 2 at `far_sep`  along axis 1   -> a far OUTLIER.
+    So the high-D distances are exactly  d(0,1)=near_sep,  d(0,2)=far_sep,
+    d(1,2)=sqrt(near_sep**2 + far_sep**2).
+
+    High-D fuzzy membership (a SIMPLIFIED, symmetric heat kernel, appropriate for this 3-point case):
+        P_ij = exp(-d_ij**2 / (2 * near_sep**2)),  P_ii = 0.
+    The near pair gets a substantial membership (P[0,1] = exp(-0.5) ~= 0.607 at the defaults) while the
+    far point's memberships collapse toward 0 (P[0,2] = exp(-32) ~= 0). NOTE the real UMAP graph uses a
+    per-point local-connectivity rho + binary-searched sigma (see `umap_objective_toy`); that trick
+    normalizes away absolute scale and, with only 3 points, would force every point's nearest-neighbor
+    membership to 1 — hiding the very near/far contrast this toy is meant to show. The heat kernel keeps
+    membership monotone in distance so the two-vs-one story is exact and hand-computable.
+
+    Low-D optimization is IDENTICAL to `umap_objective_toy`: a 2-D layout, Cauchy similarity
+    q_ij = 1/(1+||y_i-y_j||**2), fuzzy cross-entropy loss, full-batch attractive/repulsive gradient
+    grad_i = sum_j 2 (y_i - y_j) [P_ij q_ij - (1-P_ij) q_ij**2/(1-q_ij)], norm-clipped for stability.
+    The near pair (high P) is pulled together; the far point (P ~= 0) is pushed away, and the objective
+    falls monotonically.
+
+    Returns a dict of HARD NUMBERS a notebook can print to ~3 decimals:
+      X_high        (3,dim)   the exact initial high-D coordinates.
+      high_dist     (3,3)     initial pairwise high-D distances (high_dist[0,1]=near_sep, etc.).
+      P             (3,3)     high-D fuzzy memberships (P[0,1] > P[0,2]).
+      snapshots     list[(iter, Y (3,2))]   the low-D layout at iter 0 and every `snapshot_every`.
+      iters         (S,) int  the iteration number of each snapshot (aligned with snapshots).
+      Y_final       (3,2)     the final 2-D positions.
+      loss_history  (n_iter,) fuzzy cross-entropy per iteration (decreasing).
+      low_dist_final(3,3)     final pairwise low-D distances.
+      near_pair (0,1), far_pair (0,2)  the index pairs, and per-snapshot distances for each:
+      near_dist     (S,)      low-D distance of the neighbor pair (0,1) at each snapshot (shrinks).
+      far_dist      (S,)      low-D distance of the far pair (0,2) at each snapshot (grows)."""
+    eps, grad_clip = 1e-3, 4.0
+    dim = int(dim)
+    # 1. deterministic high-D coordinates: neighbor along axis 0, outlier along axis 1
+    X = np.zeros((3, dim), float)
+    X[1, 0] = float(near_sep)
+    X[2, 1] = float(far_sep)
+    # 2. exact pairwise high-D distances
+    D = np.sqrt(np.maximum(0.0, ((X[:, None, :] - X[None, :, :]) ** 2).sum(-1)))
+    # 3. symmetric heat-kernel fuzzy membership (monotone in distance; near pair high, far pair ~0)
+    tau2 = 2.0 * float(near_sep) ** 2
+    P = np.exp(-(D ** 2) / tau2)
+    np.fill_diagonal(P, 0.0)
+    # 4. optimize a 2-D layout by full-batch fuzzy cross-entropy gradient descent (same as the big toy)
+    rng = np.random.RandomState(int(seed))
+    Y = rng.randn(3, 2) * 1e-2
+    near_i, near_j = 0, 1
+    far_i, far_j = 0, 2
+
+    def _pair_d(Ymat, i, j):
+        return float(np.sqrt(((Ymat[i] - Ymat[j]) ** 2).sum()))
+
+    snapshots = [(0, Y.copy())]
+    iters = [0]
+    near_dist = [_pair_d(Y, near_i, near_j)]
+    far_dist = [_pair_d(Y, far_i, far_j)]
+    loss_history = []
+    for it in range(1, int(n_iter) + 1):
+        diff = Y[:, None, :] - Y[None, :, :]                 # (3,3,2)
+        d2 = (diff ** 2).sum(-1)                              # (3,3)
+        q = 1.0 / (1.0 + d2)
+        np.fill_diagonal(q, 0.0)
+        coeff = 2.0 * (P * q - (1.0 - P) * (q * q) / (1.0 - q + eps))
+        np.fill_diagonal(coeff, 0.0)
+        grad = (coeff[:, :, None] * diff).sum(axis=1)         # (3,2)
+        gn = np.linalg.norm(grad, axis=1, keepdims=True)
+        grad = np.where(gn > grad_clip, grad / gn * grad_clip, grad)
+        Y = Y - float(lr) * grad
+        with np.errstate(divide="ignore", invalid="ignore"):
+            ce = -(P * np.log(q + 1e-12) + (1 - P) * np.log(1 - q + 1e-12))
+        loss_history.append(float(np.nansum(np.triu(ce, 1))))
+        if it % int(snapshot_every) == 0 or it == int(n_iter):
+            snapshots.append((it, Y.copy()))
+            iters.append(it)
+            near_dist.append(_pair_d(Y, near_i, near_j))
+            far_dist.append(_pair_d(Y, far_i, far_j))
+    low_dist_final = np.sqrt(((Y[:, None, :] - Y[None, :, :]) ** 2).sum(-1))
+    return dict(X_high=X, high_dist=D, P=P, snapshots=snapshots, iters=np.asarray(iters),
+                Y_final=Y, loss_history=np.asarray(loss_history), low_dist_final=low_dist_final,
+                near_pair=(near_i, near_j), far_pair=(far_i, far_j),
+                near_dist=np.asarray(near_dist), far_dist=np.asarray(far_dist))
+
+
+def umap_toy_fig(toy3, title=None, height=460):
+    """Visualize a `umap_toy_3point(...)` result: two panels sharing the house style.
+
+    LEFT — the three points' 2-D trajectory across snapshots: each point's path from its initial
+    (open circle) to its final (solid, larger) position, so you SEE the neighbor pair (points 0 & 1)
+    drawn together while the far point (2) is pushed away.
+    RIGHT — the fuzzy cross-entropy objective per iteration, falling as the layout organizes.
+
+    `toy3` is the dict from `umap_toy_3point`. Returns a plotly Figure (template plotly_white)."""
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+    snaps = toy3["snapshots"]
+    Ys = np.stack([Y for _, Y in snaps], axis=0)             # (S,3,2)
+    (ni, nj), (fi, fj) = toy3["near_pair"], toy3["far_pair"]
+    # near pair = two blues, far point = orange (qualitative, distinct from the rank scheme)
+    colors = {ni: "#1f77b4", nj: "#4c9be8", fj: "#f58518"}
+    names = {ni: f"point {ni} (neighbor)", nj: f"point {nj} (neighbor)", fj: f"point {fj} (far)"}
+    fig = make_subplots(rows=1, cols=2, column_widths=[0.58, 0.42],
+                        subplot_titles=("2-D layout trajectory", "cross-entropy objective"))
+    for p in (ni, nj, fj):
+        col = colors[p]
+        fig.add_trace(go.Scatter(x=Ys[:, p, 0], y=Ys[:, p, 1], mode="lines+markers",
+                                 line=dict(color=col, width=1.5),
+                                 marker=dict(color=col, size=5), name=names[p],
+                                 legendgroup=names[p]), row=1, col=1)
+        # start = open circle, end = big solid dot
+        fig.add_trace(go.Scatter(x=[Ys[0, p, 0]], y=[Ys[0, p, 1]], mode="markers",
+                                 marker=dict(color="white", size=9, line=dict(color=col, width=2)),
+                                 showlegend=False, hoverinfo="skip", legendgroup=names[p]),
+                      row=1, col=1)
+        fig.add_trace(go.Scatter(x=[Ys[-1, p, 0]], y=[Ys[-1, p, 1]], mode="markers",
+                                 marker=dict(color=col, size=13, line=dict(color="white", width=1)),
+                                 showlegend=False, hoverinfo="skip", legendgroup=names[p]),
+                      row=1, col=1)
+    loss = toy3["loss_history"]
+    fig.add_trace(go.Scatter(x=np.arange(1, len(loss) + 1), y=loss, mode="lines",
+                             line=dict(color="#54a24b", width=2), name="loss",
+                             showlegend=False), row=1, col=2)
+    fig.update_xaxes(showticklabels=False, showgrid=False, zeroline=False, row=1, col=1)
+    fig.update_yaxes(showticklabels=False, showgrid=False, zeroline=False,
+                     scaleanchor="x", scaleratio=1, row=1, col=1)
+    fig.update_xaxes(title="iteration", row=1, col=2)
+    fig.update_yaxes(title="cross-entropy", row=1, col=2)
+    fig.update_layout(template="plotly_white", height=height,
+                      title=title or "UMAP toy — two points converge, one is pushed away",
+                      margin=dict(l=10, r=10, t=70, b=10))
     return fig
 
 

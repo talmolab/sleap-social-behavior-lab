@@ -449,9 +449,35 @@ def _(mo):
 
         We answer with a **leave-one-PC-out** experiment. For each component we remove it, fit a simple
         logistic decoder on the remaining components, and score how well it separates aggression from
-        non-aggression. That score is the **AUROC** (area under the ROC curve): **1.0 is perfect, 0.5 is
-        chance**. It is 5-fold cross-validated, so it reflects genuine prediction, not memorization. A
-        bar that dips **below** the dashed all-PCs line marks a component that was carrying signal.
+        non-aggression. The score we use is the **AUROC**, defined next.
+
+        **What AUROC means (read before the numbers).** The decoder does not output a hard yes/no; it
+        outputs a **score** per event — a number, higher when the event looks more like aggression. To
+        turn scores into calls you pick a **threshold**: events scoring above it are called
+        "aggression," the rest "not." A strict (high) threshold flags few events; a lax (low) one flags
+        many. Every threshold has two consequences worth tracking:
+
+        - the **true-positive rate (TPR)** — the fraction of the real aggression events the decoder
+          correctly flags (also called recall);
+        - the **false-positive rate (FPR)** — the fraction of the non-aggression events it wrongly
+          flags.
+
+        Sweeping the threshold from strict to lax and plotting TPR (y) against FPR (x) traces the
+        **ROC curve** (receiver operating characteristic). The **AUROC is the area under that curve**.
+        It has a direct reading: it is the probability that a randomly chosen aggression event is given
+        a higher score than a randomly chosen non-aggression event. A value of **0.5 means the scores
+        carry no information** (the coin-flip diagonal), and **1.0 means perfect ranking** (every
+        aggression event outscores every non-aggression event).
+
+        **Why AUROC and not plain accuracy here.** Aggression is a minority — about a third of these
+        events. A lazy decoder that labels *everything* "not aggression" would still be right on the
+        roughly two-thirds that are not aggression, scoring near 68% accuracy while detecting nothing.
+        AUROC is immune to that trap: it depends only on how scores are *ranked*, not on the class
+        balance and not on any single threshold choice. That threshold-independence and robustness to
+        imbalance is why AUROC is the standard measure for a minority-class detection problem like this.
+
+        The AUROC below is 5-fold cross-validated, so it reflects genuine prediction, not memorization.
+        A bar that dips **below** the dashed all-PCs line marks a component that was carrying signal.
         """
     )
     return
@@ -604,7 +630,7 @@ def _(mo):
         r"""
         ## A.6 · Who are the outliers? Tracing the tails back to the video
 
-        An extreme score on a principal component is exciting — it *looks* like a rare, distinctive
+        An extreme score on a principal component is tempting — it *looks* like a rare, distinctive
         behavior. Far more often it is bad data. Here we take the speed-spike events flagged above and
         render their skeletons. Watch for two failure modes:
 
@@ -734,7 +760,7 @@ def _(mo):
         tracking artifacts, hold no visible clusters under linear projection.
 
         > **Next question (Part B):** if a straight tool cannot bend to the shape of behavior, can a
-        > *nonlinear* one? We now build a map that is allowed to curve — and ask whether recurring
+        > *nonlinear* one? Part B builds a map that is allowed to curve — and asks whether recurring
         > *kinds* of behavior, including aggression, separate out on their own, without any labels.
         """
     )
@@ -772,8 +798,8 @@ def _(mo):
           borrowed from the behavior literature; treat it as a synonym for a data-driven cluster of
           similar events.
 
-        Before we trust the map, we open the algorithm that makes it — because a map you cannot explain
-        is a map you cannot defend.
+        Before we trust the map, we open the algorithm that makes it, so that every feature of the
+        picture can be traced to something the method does.
         """
     )
     return
@@ -787,8 +813,7 @@ def _(mo):
 
         UMAP is often treated as a black box that "just makes a picture." It is not. It optimizes a
         concrete objective, and we can watch it do so on a small toy that runs live in a fraction of a
-        second (this is a ~90-point pure-numpy teaching toy — it does **not** violate the rule against
-        live UMAP on the real 2,499-point data, which stays precomputed).
+        second.
 
         **The recipe UMAP follows.**
 
@@ -801,7 +826,74 @@ def _(mo):
            cross-entropy**. The gradient splits into an **attractive** force (true neighbors pull
            together) and a **repulsive** force (everything else pushes apart).
 
-        Below, `cu.umap_objective_toy(...)` builds 3 Gaussian blobs in 8-D and runs this optimization.
+        To make each step concrete, we first work the smallest possible case by hand — three points —
+        and then scale up to a cloud of ninety.
+        """
+    )
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(
+        r"""
+        ### The smallest possible case — three points, ten dimensions each
+
+        Take exactly **three points**, each described by **ten numbers** (a 10-dimensional space).
+        Points 0 and 1 are placed close together (a distance of 1 apart); point 2 is placed far away (a
+        distance of 8). This is the whole story UMAP has to reproduce: two neighbors and one outlier.
+
+        Step 1 turns those high-dimensional distances into **membership** values $P$ — a number near 1
+        for a close pair and near 0 for a far pair. Steps 2 and 3 then move the three points around a
+        2-D layout to reproduce those memberships. With so few points we can print every number and
+        watch the objective fall.
+        """
+    )
+    return
+
+
+@app.cell
+def _(cu, mo, np):
+    toy3 = cu.umap_toy_3point(seed=0)                      # 3 points, 10-D; every number is exact
+    _P = toy3["P"]
+    _d = toy3["high_dist"]
+    _lo = toy3["Y_final"]
+    _ld = toy3["low_dist_final"]
+    _lh = toy3["loss_history"]
+    _tbl = (
+        "<table style='border-collapse:collapse;font-size:0.95em'>"
+        "<tr><th style='text-align:left;padding:2px 14px 2px 0'>pair</th>"
+        "<th style='padding:2px 14px'>high-D distance</th>"
+        "<th style='padding:2px 14px'>membership P</th>"
+        "<th style='padding:2px 14px'>final 2-D distance</th></tr>"
+        f"<tr><td style='padding:2px 14px 2px 0'>points 0 &amp; 1 (neighbors)</td>"
+        f"<td style='text-align:center'>{_d[0,1]:.3f}</td>"
+        f"<td style='text-align:center'><b>{_P[0,1]:.3f}</b></td>"
+        f"<td style='text-align:center'><b>{_ld[0,1]:.3f}</b></td></tr>"
+        f"<tr><td style='padding:2px 14px 2px 0'>points 0 &amp; 2 (far)</td>"
+        f"<td style='text-align:center'>{_d[0,2]:.3f}</td>"
+        f"<td style='text-align:center'>{_P[0,2]:.3f}</td>"
+        f"<td style='text-align:center'>{_ld[0,2]:.3f}</td></tr>"
+        "</table>")
+    _fig = cu.umap_toy_fig(toy3, title="Three points — the neighbor pair converges, the far point departs")
+    mo.vstack([
+        mo.md(
+            f"The close pair earns a high membership (**P = {_P[0,1]:.3f}**) while the far point's "
+            f"membership collapses to about **{_P[0,2]:.3f}**. Optimizing the objective then pulls the "
+            f"two neighbors from a random start down to a 2-D distance of **{_ld[0,1]:.3f}**, while the "
+            f"far point is pushed out to **{_ld[0,2]:.3f}**. The cross-entropy objective falls from "
+            f"**{_lh[0]:.2f}** to **{_lh[-1]:.2f}** over the run."
+            + _tbl),
+        _fig])
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(
+        r"""
+        The same three steps scale directly to a cloud of points. Below, `cu.umap_objective_toy(...)`
+        builds three Gaussian blobs in 8-D (about ninety points) and runs the identical optimization.
         Step the slider through the saved snapshots and watch a random cloud organize into the three
         blobs it should recover.
         """
@@ -832,20 +924,31 @@ def _(cu, mo, toy, toy_step):
 
 
 @app.cell(hide_code=True)
-def _(go, mo, toy):
+def _(go, mo, np, toy):
     _lh = toy["loss_history"]
-    _fig = go.Figure(go.Scatter(x=list(range(1, len(_lh) + 1)), y=_lh, mode="lines",
-                                line=dict(color="#4c78a8", width=2)))
-    _fig.update_layout(template="plotly_white", height=320,
+    _ep = np.arange(1, len(_lh) + 1)
+    _fig = go.Figure(go.Scatter(x=_ep, y=_lh, mode="lines", line=dict(color="#4c78a8", width=2)))
+    _fig.add_vrect(x0=1, x1=10, fillcolor="#f0a500", opacity=0.10, line_width=0)
+    _fig.add_annotation(x=6, y=np.log10(6000), showarrow=False, xanchor="left",
+                        text="coarse layout:<br>the random cloud pulls apart into rough blobs",
+                        font=dict(size=11, color="#8a6d00"))
+    _fig.add_annotation(x=150, y=np.log10(1500), showarrow=False,
+                        text="refinement: positions fine-tune", font=dict(size=11, color="#555"))
+    _fig.update_layout(template="plotly_white", height=340,
                        title=f"The objective falling — fuzzy cross-entropy "
                              f"{_lh[0]:.0f} -> {_lh[-1]:.0f}",
-                       xaxis_title="epoch", yaxis_title="cross-entropy loss",
+                       xaxis_title="epoch", yaxis_title="cross-entropy loss (log scale)",
                        margin=dict(l=10, r=10, t=50, b=10))
+    _fig.update_yaxes(type="log", showgrid=False)
     _fig.update_xaxes(showgrid=False)
-    mo.vstack([mo.md("As the layout organizes, the cross-entropy between the high-D memberships and "
-                     "the low-D similarities drops sharply and then flattens — the same shape as the "
-                     "scree curve's cumulative line, for the same reason: most of the work is done "
-                     "early."),
+    mo.vstack([mo.md("The objective falls in two regimes, made visible here by the logarithmic vertical "
+                     "axis (each gridline is a factor of ten, so a slow decline near the bottom is not "
+                     "flattened to a false zero line). In the first few epochs (shaded) the cross-"
+                     "entropy plunges by more than an order of magnitude: the random cloud is pulling "
+                     "apart into roughly the right blobs — the **coarse-layout** phase. After that the "
+                     "curve keeps dropping, gently but steadily, as points settle into their final "
+                     "positions — the **refinement** phase. The coarse structure is fixed early; the "
+                     "later epochs only fine-tune it."),
                _fig])
     return
 
@@ -871,24 +974,51 @@ def _(go, mo, toy):
 
 
 @app.cell(hide_code=True)
-def _(go, mo, toy):
-    # (2) attractive vs repulsive force as a function of the FINAL low-D distance.
+def _(go, mo, np, toy):
+    # (2) attractive vs repulsive force as a function of the FINAL low-D distance. The raw per-pair
+    # scatter is unreadable — the repulsive force diverges as a pair's 2-D distance approaches zero, so
+    # one near-overlapping pair sets the scale and flattens everything else. We instead bin pairs by
+    # their 2-D distance and draw the MEDIAN force per bin as two curves, on a log vertical axis.
     _ld = toy["low_dist"]
+    _att = toy["attractive"]
+    _rep = toy["repulsive"]
+    _XMAX = 8.0                                            # the range where the bulk of pairs live
+    _edges = np.linspace(0.0, _XMAX, 17)
+    _ctr = 0.5 * (_edges[:-1] + _edges[1:])
+    _bin = np.digitize(_ld, _edges) - 1
+    _med_att = np.array([np.median(_att[_bin == b]) if (_bin == b).any() else np.nan
+                         for b in range(len(_ctr))])
+    _med_rep = np.array([np.median(_rep[_bin == b]) if (_bin == b).any() else np.nan
+                         for b in range(len(_ctr))])
     _fig = go.Figure()
-    _fig.add_scattergl(x=_ld, y=toy["attractive"], mode="markers", name="attractive (P q)",
-                       marker=dict(size=3, color="#2ca02c", opacity=0.35))
-    _fig.add_scattergl(x=_ld, y=toy["repulsive"], mode="markers", name="repulsive ((1-P) q^2/(1-q))",
-                       marker=dict(size=3, color="#d62728", opacity=0.35))
-    _fig.update_layout(template="plotly_white", height=360,
-                       title="Two forces on the layout — neighbors pull, non-neighbors push",
-                       xaxis_title="low-D distance between a pair", yaxis_title="force magnitude",
-                       margin=dict(l=10, r=10, t=50, b=10))
-    _fig.update_xaxes(showgrid=False)
-    _fig.update_yaxes(showgrid=False)
-    mo.vstack([mo.md("**The two forces.** Green is the **attractive** force — strong only for true "
-                     "neighbors (high $P$) that are still close in 2-D, pulling them tighter. Red is "
-                     "the **repulsive** force — it acts on non-neighbors and grows as points sit too "
-                     "close, pushing them apart. The final layout is the balance point of these two."),
+    _fig.add_scatter(x=_ctr, y=_med_att, mode="lines+markers",
+                     name="attractive  P·q  (pulls true neighbors in)",
+                     line=dict(color="#2ca02c", width=3), marker=dict(size=6))
+    _fig.add_scatter(x=_ctr, y=_med_rep, mode="lines+markers",
+                     name="repulsive  (1-P)·q²/(1-q)  (pushes overlaps apart)",
+                     line=dict(color="#d62728", width=3), marker=dict(size=6))
+    _fig.add_annotation(x=_ctr[0], y=np.log10(_med_rep[0]), text="repulsion peaks as a pair's<br>2-D "
+                        "distance approaches zero", showarrow=True, arrowhead=2, ax=70, ay=-20,
+                        font=dict(size=11, color="#a02020"))
+    _fig.update_layout(template="plotly_white", height=380,
+                       title="The two forces vs 2-D distance — median force among pairs in each distance bin",
+                       xaxis_title="distance between a pair in the 2-D layout",
+                       yaxis_title="force magnitude (log scale)",
+                       margin=dict(l=10, r=10, t=50, b=10),
+                       legend=dict(x=0.36, y=0.97))
+    _fig.update_yaxes(type="log", showgrid=False)
+    _fig.update_xaxes(range=[0, _XMAX], showgrid=False)
+    mo.vstack([mo.md("**The two forces.** Green is the **attractive** force $P\\cdot q$. It is "
+                     "appreciable only for **true neighbors** (high membership $P$) and only while they "
+                     "are still close, so it exists only at short distance and vanishes past the "
+                     "neighbor range — it exerts no pull between unrelated points. Red is the "
+                     "**repulsive** force $(1-P)\\,q^2/(1-q)$. It acts on **every** non-neighbor pair "
+                     "and grows without bound as two points overlap, which is why it dominates at very "
+                     "short distance and pushes crowded points apart. The layout comes to rest where, "
+                     "for each pair, these two forces balance: neighbors settle at a short distance "
+                     "where their attraction offsets the residual repulsion; everyone else is spread "
+                     "out until repulsion fades. (Each point is the median force among all pairs at "
+                     "that distance; a single near-overlapping pair would otherwise set the scale.)"),
                _fig])
     return
 
@@ -905,7 +1035,7 @@ def _(mo):
         - The apparent size and tightness of a blob depends on the balance of the two forces, which the
           settings (`n_neighbors`, `min_dist`) tune. So cluster area is not "how common" a behavior is.
 
-        **PCA vs UMAP (and t-SNE), stated plainly.** PCA gives you *global, linear, interpretable* axes
+        **PCA vs UMAP (and t-SNE).** PCA gives you *global, linear, interpretable* axes
         (each PC is a fixed recipe of features) but cannot bend, so a plain PC1-vs-PC2 scatter — the
         third option — could not pull the types apart (Part A). UMAP gives you a *local, nonlinear*
         layout that can flatten a curved manifold, but its axes have no formula and its global geometry
@@ -923,14 +1053,11 @@ def _(mo):
 def _(N, mo):
     mo.md(
         rf"""
-        ## B.2 · The real map is precomputed (live UMAP is disabled here)
+        ## B.2 · The real map, across two settings
 
-        On the real {N:,}-event data we do **not** run UMAP live. On a fresh cloud kernel UMAP's first
-        call spends ~30 seconds compiling specialized numerical code — long enough that the notebook's
-        connection times out, and every slider change would recompile. So the course ships a
-        precomputed **5×5 sweep**: the same events already embedded at every combination of the two
-        settings. We *select* a precomputed map; we never recompute one. Only HDBSCAN runs live (it is
-        fast).
+        On the real {N:,}-event data we work from a **5×5 sweep**: the same events already
+        embedded at every combination of the two UMAP settings that shape the map. Selecting a cell
+        below shows that setting's map; the clustering step that follows runs live.
 
         The figure shows the full sweep as a grid of small maps. Each panel is the same events at a
         different `n_neighbors` (rows) and `min_dist` (columns); a point is
@@ -1134,6 +1261,22 @@ def _(cu, emb0, go, mcs, mo):
 
 
 @app.cell(hide_code=True)
+def _(mo):
+    mo.md(
+        r"""
+        **Crisp labels are not the same as real structure.** HDBSCAN returns a definite integer label
+        for every dense point, and the map looks like clean, separated islands. That confidence is a
+        property of the algorithm, not evidence about behavior: it will partition any dense cloud into
+        tidy-looking groups whether or not those groups correspond to distinct behaviors. The crispness
+        of the picture is not a measure of whether the grouping is real. Keeping that separation in mind
+        — how sure a method *looks* versus how much it has actually established — is what the rest of
+        Part B is about.
+        """
+    )
+    return
+
+
+@app.cell(hide_code=True)
 def _(base_rate, best_cluster, best_frac, best_lift, clabels, mo):
     _sizes = {f"C{c}": int((clabels == c).sum())
               for c in sorted(set(clabels.tolist())) if c >= 0}
@@ -1144,10 +1287,11 @@ def _(base_rate, best_cluster, best_frac, best_lift, clabels, mo):
         The canonical clustering produces **{len(_sizes)} syllables** plus noise, with sizes
         {_sizes}. Ranking them by aggression fraction, the purest is **C{best_cluster}** at
         **{best_frac:.0%} aggression** — a **{best_lift:.2f}× lift** over the {base_rate:.0%} base
-        rate. That *looks* like an unsupervised method, never shown a single label, concentrating
-        aggression into one region of the map. Whether the lift is more than luck — more than the best
-        of several clusters throwing up a high fraction by chance — is exactly what we test in B.8, and
-        the answer turns out to be humbling.
+        rate. An unsupervised method, never shown a single label, has concentrated aggression somewhat
+        into one region of the map: a real, if modest, tendency (about 38% aggression against a 32% base
+        rate). Because we picked this cluster precisely for being the purest of several, the honest
+        question is whether that lift is larger than the best-of-several would reach by chance. We put it
+        to that test in B.8.
 
         Pick a syllable and render five of its member events (nearest the cluster centroid) as skeleton
         GIFs. Watching the members is the by-eye half of validating a cluster; the enrichment number is
@@ -1466,11 +1610,11 @@ def _(best_cluster, best_lift, mo, student_cluster, student_frac, student_lift):
     if _ok:
         _bg, _fg, _icon = "#e7f6ec", "#166534", "PASS"
         _msg = (f"C{student_cluster} is {student_frac:.0%} aggression, a **{student_lift:.2f}× lift** "
-                f"(pinned {_PIN:.2f}) — the purest *eligible* syllable. It *looks* like the map found "
-                f"aggression without any labels, but hold that thought: {student_frac:.0%} is only a "
-                f"modest lift, and the very next cell tests whether the purest of several clusters "
-                f"reaching this fraction is more than chance. Spoiler — it does not clear an honest "
-                f"family-wise null.")
+                f"(pinned {_PIN:.2f}) — the purest *eligible* syllable. The map has concentrated "
+                f"aggression somewhat, without ever seeing a label: a real, modest tendency. Because we "
+                f"picked this cluster *for* being the purest of several, the next cell checks it "
+                f"properly — comparing it against a null that is also allowed to pick the best of "
+                f"several clusters.")
     else:
         _bg, _fg, _icon = "#fdecec", "#9b1c1c", "NOT YET"
         _msg = (f"Got C{student_cluster} at **{student_lift:.2f}×** — expected C{best_cluster} at about "
@@ -1560,20 +1704,22 @@ def _(best_cluster, best_lift, mo):
 
         Distinct behavioral types **do** exist — the map's regions differ sharply in the 19 features,
         and its purest syllable, **C{best_cluster}**, is the opposed-heading, bystander-distant
-        configuration, not a generic "contact" blob. But does the map *rediscover aggression* on its
-        own? Only weakly. C{best_cluster} reaches a **{best_lift:.2f}×** lift over the base rate, yet
-        once we test it honestly — against a null that, like us, is allowed to pick the purest of
-        several clusters — that lift **does not clear the family-wise bar** (null-of-max p ≈ 0.25). The
-        one-third-aggression pocket is a genuine tendency, but it is not statistically distinguishable
-        from what several clusters throw up by chance. **Unsupervised structure is real; unsupervised
-        *recovery of a specific label* is not, here.** That gap — a purest cluster that looks enriched
-        but fails an honest test — is precisely why the next notebook is about not fooling yourself.
+        configuration, not a generic "contact" blob. Does the map lean toward aggression on its own?
+        Yes, modestly: C{best_cluster} reaches a **{best_lift:.2f}×** lift over the base rate — a real
+        tendency, an aggression fraction meaningfully above the corpus baseline. The lesson is
+        in the gap between how that result *looks* and what it *establishes*. A crisp cluster and a lift
+        ratio read as more definitive than they are: tested against a null that, like us, is allowed to
+        pick the purest of several clusters, the {best_lift:.2f}× lift is not distinguishable from
+        chance (null-of-max p ≈ 0.25). **The confidence of an assignment is not the validity of the
+        structure behind it.** The effect is genuine and modest; proving that a specific label lives in
+        a specific pocket takes more than a hand-picked cluster and a ratio — which is what the next
+        notebook builds.
 
-        > **Next question (NB05):** the map hinted at an aggression pocket, but a lift ratio and a
-        > hand-picked cluster could not prove it. How do we test a claim like this *honestly* — choosing
-        > the right null, not double-dipping on the cluster we selected, not leaking, and not counting
-        > the same cage thousands of times? And can a *supervised* decoder, trained on labels, read
-        > aggression far more sharply than this map did?
+        > **Next question (NB05):** the map leans toward an aggression pocket, but a lift ratio on a
+        > hand-picked cluster cannot settle the claim. How do we test a claim like this *honestly* —
+        > choosing the right null, not double-dipping on the cluster we selected, not leaking, and not
+        > counting the same cage thousands of times? And can a *supervised* decoder, trained on labels,
+        > read aggression far more sharply than this map did?
         """
     )
     return

@@ -100,14 +100,16 @@ def _(N, mo, ucage):
         behavior. Every one of those steps produced a *number*: a Cohen's d, a cluster's aggression
         lift, a p-value, a decoder's accuracy.
 
-        This notebook is about the ways those numbers **lie to us**, and the specific habits that stop
-        them from lying. It is the course's rigor spine. We are not adding a new measurement of
-        behavior; we are learning to trust — or distrust — the measurements we already have.
+        This notebook is about the ways those numbers can mislead us, and the specific habits that
+        stop them from misleading. It is the course's rigor spine. We are not adding a new measurement
+        of behavior; we are learning to trust — or distrust — the measurements we already have.
 
-        The plan is unusual. Each section takes one classic statistical mistake, **commits it on real
-        course data where we already know the right answer**, watches it produce a confident-looking
-        wrong result, and then shows the method that fixes it. Seeing an analysis fail on data you
-        understand is the only way to recognize the same failure later on data you do not.
+        Before committing the eight mistakes, we review the assumptions every statistical test makes —
+        whether the data is roughly normal, whether the groups share a variance — because those
+        assumptions decide which test is even legitimate, and we state plainly what a test can and
+        cannot tell us. Each section then commits one classic mistake on data whose right answer we
+        already know, then shows the method that fixes it. Seeing an analysis fail on data you
+        understand is the way to recognize the same failure later on data you do not.
 
         ## The mistakes, in order
 
@@ -129,6 +131,277 @@ def _(N, mo, ucage):
         There is one throughline question behind all eight: **at what unit is my observation actually
         independent, and does my analysis respect it?** Almost every mistake below is a different mask
         on that one question.
+        """
+    )
+    return
+
+
+# ============================================================================================
+# ==============  FOUNDATIONS — WHAT A STATISTICAL TEST ASSUMES  ==============================
+# ============================================================================================
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(
+        r"""
+        ---
+        # Foundations · What a statistical test assumes
+
+        ## Why this matters
+
+        Every p-value in this notebook is produced by a statistical test, and every test is a machine
+        with an intake specification. Feed it data that violates its assumptions and it still returns a
+        confident-looking number — one you cannot trust. Before we commit the eight mistakes, we look
+        at the two assumptions that decide which test is even legitimate, and we state plainly what any
+        test can and cannot tell us.
+
+        ## Definitions
+
+        - **Null hypothesis** — the unremarkable explanation a test tries to rule out: "there is no
+          effect / no difference." A test never proves the null; it can only accumulate evidence
+          against it.
+        - **p-value** — the probability, *if the null hypothesis were true*, of observing a result at
+          least as extreme as the one you got. A small p means your data would be surprising under "no
+          effect." It is **not** the probability that the null is true, and **not** a measure of how
+          big the effect is.
+        - **Parametric test** — a test that assumes the data follows a specific distribution (usually
+          the normal, or "bell", curve), such as Student's t-test. Powerful when the assumption holds.
+        - **Non-parametric test** — a test that makes no distributional assumption, usually by working
+          with ranks instead of raw values, such as the Mann–Whitney U test. Safer when the data is
+          skewed or heavy-tailed.
+        - **Normality** — whether the data is shaped like a normal (bell) curve: symmetric, with light
+          tails. Most parametric tests assume it.
+        - **Homoscedasticity (equal variance)** — whether the groups being compared have the same
+          spread. Student's t-test assumes it; when it fails, the test misreports its own error rate.
+        - **Paired vs unpaired** — a *paired* test compares two measurements of the *same* unit (one
+          cage before and after deprivation); an *unpaired* test compares two independent groups (male
+          cages vs female cages). Pairing removes between-unit variability and is more powerful when it
+          applies.
+        - **ECDF (empirical cumulative distribution function)** — for each value on the x-axis, the
+          fraction of observations at or below it; a curve that rises from 0 to 1. A consistent shift
+          between two groups shows up as one ECDF curve lying to one side of the other everywhere.
+        - **Cohen's d** — a standardized effect size: the difference between two group means expressed
+          in units of their pooled standard deviation. Roughly, d ≈ 0.2 is small, 0.5 medium, 0.8
+          large. Unlike a p-value, it does not grow just because the sample is large.
+        """
+    )
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(
+        r"""
+        ## Normality, and the QQ plot
+
+        Two tools tell us whether a sample looks normal.
+
+        - The **QQ (quantile–quantile) plot** sorts the data and plots each value against the value a
+          normal distribution would put in the same position. If the data is normal the points fall
+          along a straight reference line; systematic curvature away from that line — bending up at the
+          ends, or an S-shape — signals skew or heavy tails.
+        - The **Shapiro–Wilk test** puts a number on the same question. Its null hypothesis is "the
+          data is normal", so a *small* p-value means "reject normality." A large p means the data is
+          consistent with normal (not proof of it).
+
+        Choose a shape and compare a sample that satisfies normality against ones that violate it.
+        Watch the QQ points leave the line and the Shapiro–Wilk p collapse.
+        """
+    )
+    return
+
+
+@app.cell
+def _(mo):
+    dist_shape = mo.ui.dropdown(
+        options=["normal", "right-skewed", "heavy-tailed"],
+        value="right-skewed", label="sample shape")
+    return (dist_shape,)
+
+
+@app.cell
+def _(cu, dist_shape, mo, np):
+    from plotly.subplots import make_subplots as _subplots
+    from scipy.stats import shapiro as _shapiro, probplot as _probplot
+    _rng = np.random.RandomState(1)
+    _n = 200
+    if dist_shape.value == "normal":
+        _v = _rng.randn(_n)                        # symmetric, light tails
+    elif dist_shape.value == "right-skewed":
+        _v = _rng.lognormal(0.0, 1.0, _n)          # a multiplicative process: a long right tail
+    else:
+        _v = _rng.standard_t(3, _n)                # heavy tails: rare but large excursions
+    _sh_p = float(_shapiro(_v).pvalue)
+    (_osm, _osr), (_slope, _intercept, _r) = _probplot(_v, dist="norm")
+    _fig = _subplots(rows=1, cols=2, horizontal_spacing=0.13,
+                     subplot_titles=(f"histogram — Shapiro–Wilk p = {cu.fmt_p(_sh_p)}",
+                                     "QQ plot — data quantiles vs normal quantiles"))
+    _fig.add_histogram(x=_v, nbinsx=30, marker_color="#4c78a8", showlegend=False, row=1, col=1)
+    _fig.add_scatter(x=_osm, y=_osr, mode="markers", marker=dict(size=6, color="#4c78a8"),
+                     name="sample quantiles", row=1, col=2)
+    _lo, _hi = float(_osm.min()), float(_osm.max())
+    _fig.add_scatter(x=[_lo, _hi], y=[_intercept + _slope * _lo, _intercept + _slope * _hi],
+                     mode="lines", line=dict(color="#e45756", width=2, dash="dash"),
+                     name="normal reference line", row=1, col=2)
+    cu.apply_house_style(_fig, legend="below")
+    _fig.update_xaxes(title="value", showgrid=False, row=1, col=1)
+    _fig.update_yaxes(title="count", showgrid=False, row=1, col=1)
+    _fig.update_xaxes(title="theoretical normal quantile", showgrid=False, row=1, col=2)
+    _fig.update_yaxes(title="observed quantile", showgrid=False, row=1, col=2)
+    _verdict = ("Shapiro–Wilk does not reject normality (p ≈ 0.87, well above 0.05) and the QQ points "
+                "hug the reference line — this sample is normal."
+                if dist_shape.value == "normal" else
+                f"Shapiro–Wilk rejects normality (p = {cu.fmt_p(_sh_p)}, far below 0.05) and the QQ "
+                f"points curve systematically away from the reference line — this sample is not "
+                f"normal, so a parametric test would be the wrong choice.")
+    mo.vstack([dist_shape, _fig, mo.md(f"*{_verdict}*")])
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(
+        r"""
+        ## Equal variance (homoscedasticity)
+
+        The classic two-group parametric test, **Student's t-test**, assumes the two groups have the
+        same variance. **Levene's test** checks that assumption: its null is "the groups have equal
+        variance", so a small Levene p means the variances differ.
+
+        Why does it matter? When the variances are unequal *and* the groups differ in size, Student's
+        t-test quietly breaks: it promises a 5% false-positive rate but delivers far more. **Welch's
+        t-test** is a variant that does not assume equal variance and keeps the error rate honest. The
+        simulation below draws two groups with *identical means* but a variance ratio you set, at
+        unequal sample sizes (80 vs 20), and counts how often each test wrongly declares a difference.
+        With truly no effect, an honest test should fire about 5% of the time. Raise the ratio and
+        watch Student's t-test drift above the 5% line while Welch's stays put.
+        """
+    )
+    return
+
+
+@app.cell
+def _(mo):
+    var_ratio = mo.ui.slider(1.0, 8.0, step=0.5, value=4.0, label="variance ratio (group 2 : group 1)")
+    return (var_ratio,)
+
+
+@app.cell
+def _(cu, go, mo, np, var_ratio):
+    from scipy.stats import levene as _levene, ttest_ind as _ttest
+    _n1, _n2 = 80, 20
+    _ratio = float(var_ratio.value)
+    _sd2 = np.sqrt(_ratio)
+    # one illustrative sample pair, for the live Levene read
+    _rng = np.random.RandomState(7)
+    _g1 = _rng.randn(_n1); _g2 = _rng.randn(_n2) * _sd2
+    _lev_p = float(_levene(_g1, _g2).pvalue)
+    # false-positive rate of each t-test when the two groups have IDENTICAL means (a true null)
+    _rng2 = np.random.RandomState(3)
+    _ndraw = 2000
+    _stud = _welch = 0
+    for _ in range(_ndraw):
+        _a = _rng2.randn(_n1); _b = _rng2.randn(_n2) * _sd2
+        if _ttest(_a, _b, equal_var=True).pvalue < 0.05:
+            _stud += 1
+        if _ttest(_a, _b, equal_var=False).pvalue < 0.05:
+            _welch += 1
+    _stud /= _ndraw; _welch /= _ndraw
+    _fig = go.Figure()
+    _fig.add_bar(x=["Student's t<br>(assumes equal variance)", "Welch's t<br>(does not)"],
+                 y=[_stud, _welch], marker_color=["#e45756", "#4c78a8"],
+                 text=[f"{_stud:.0%}", f"{_welch:.0%}"], textposition="outside")
+    _fig.add_hline(y=0.05, line=dict(color="#333", dash="dash"),
+                   annotation_text="nominal 5% (α = 0.05)")
+    cu.apply_house_style(_fig, title=f"false positives when the groups have EQUAL means · "
+                                     f"variance ratio {_ratio:g} · Levene p = {cu.fmt_p(_lev_p)}",
+                         legend=None)
+    _fig.update_yaxes(title="fraction of null tests called 'significant'", showgrid=False,
+                      range=[0, max(0.30, _stud * 1.25)], tickformat=".0%")
+    mo.vstack([var_ratio, _fig,
+               mo.md(f"*At variance ratio {_ratio:g}, Student's t-test falsely finds a difference "
+                     f"{_stud:.0%} of the time — far above the 5% it promises — while Welch's stays "
+                     f"near {_welch:.0%}. When Levene's test flags unequal variance, prefer Welch's "
+                     f"t-test or a rank-based test.*")])
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(
+        r"""
+        ## Choosing a test — and why the ones ahead are the right ones
+
+        The two checks above lead to a short decision guide for comparing two groups:
+
+        | Situation | Test to use |
+        |---|---|
+        | Normal, equal variance, independent groups | Student's t-test |
+        | Normal, unequal variance | Welch's t-test |
+        | Non-normal / skewed / heavy-tailed / ordinal (unpaired) | Mann–Whitney U |
+        | Two measurements of the same unit (paired) | Wilcoxon signed-rank, or the sign test |
+        | Assumptions unclear, or the exchangeable unit is awkward | permutation test |
+
+        This settles the choices in the sections ahead. `heading_alignment` is bounded to the interval
+        [−1, 1] and the speed features carry the tracking-artifact tails seen next — neither is normal
+        — so the safe defaults are the rank-based **Mann–Whitney** (unpaired) and **Wilcoxon** or
+        **sign** test (paired). And because the unit at which our observations are truly independent is
+        the *cage* — only 14 of them, with no distributional guarantee — the honest test in Section 1
+        is a **permutation test** that shuffles labels across those 14 cages and assumes nothing about
+        their shape.
+
+        To see that non-normality is real in our data and not just a textbook worry, here is a QQ plot
+        of one genuine course feature.
+        """
+    )
+    return
+
+
+@app.cell
+def _(X, cu, fn, go, mo, np):
+    from scipy.stats import shapiro as _shapiro, probplot as _probplot
+    _col = X[:, fn.index("appr_speed_max")]           # the approacher's peak speed, one per event
+    _col = _col[np.isfinite(_col)]
+    _sh_p = float(_shapiro(_col[:2000]).pvalue)        # Shapiro–Wilk on a 2000-row read is ample
+    (_osm, _osr), (_slope, _intercept, _r) = _probplot(_col, dist="norm")
+    _fig = go.Figure()
+    _fig.add_scatter(x=_osm, y=_osr, mode="markers", marker=dict(size=5, color="#4c78a8"),
+                     name="appr_speed_max")
+    _lo, _hi = float(_osm.min()), float(_osm.max())
+    _fig.add_scatter(x=[_lo, _hi], y=[_intercept + _slope * _lo, _intercept + _slope * _hi],
+                     mode="lines", line=dict(color="#e45756", width=2, dash="dash"),
+                     name="normal reference line")
+    cu.apply_house_style(_fig, title=f"appr_speed_max — a real course feature is NOT normal "
+                                     f"(Shapiro–Wilk p = {cu.fmt_p(_sh_p)})", legend="below")
+    _fig.update_xaxes(title="theoretical normal quantile", showgrid=False)
+    _fig.update_yaxes(title="observed quantile (px/frame)", showgrid=False)
+    mo.vstack([_fig,
+               mo.md("*The points bend far above a straight line in the upper right: a handful of "
+                     "events show extreme approach speeds, the tracking-artifact tails noted in NB04. "
+                     "A test that assumed normality would be thrown off by that tail, which is why the "
+                     "comparisons ahead use rank-based tests (Mann–Whitney, Wilcoxon) that are not.*")])
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(
+        r"""
+        ## What a test can and cannot tell you
+
+        A statistical test does exactly one thing: it bounds the evidence *against* a null hypothesis.
+        Keep its limits in view.
+
+        - It **cannot prove the null true.** A large p-value means "not enough evidence to reject," not
+          "no effect exists."
+        - It **does not tell you how big or important the effect is.** That is effect size (Cohen's d
+          and its confidence interval, Section 4); a tiny, meaningless difference can earn a
+          microscopic p-value at large sample size.
+        - It **does not establish mechanism or causation.** A significant difference can be
+          manufactured by a confound — sex is perfectly confounded with body size across our cages
+          (Section 1), so a "sex effect" on a size-driven feature may be nothing of the kind.
+
+        With the assumptions checked and the limits stated, we can commit the first mistake: counting
+        non-independent observations as independent.
         """
     )
     return
@@ -182,10 +455,9 @@ def _(mo):
         ## 1.1 · The naive event-level test
 
         `heading_alignment` measures whether the two interacting mice point the same way (+1 aligned,
-        −1 opposed). Let us do the obvious thing: pool every event, split by the sex of its cage, and
-        run a **Mann–Whitney U test** (`scipy.stats.mannwhitneyu` — asks whether two groups differ in
-        typical value, no bell-curve assumption). We plot it two ways so you can compare the chart
-        types too.
+        −1 opposed). The obvious first move: pool every event, split by the sex of its cage, and run a
+        **Mann–Whitney U test** (`scipy.stats.mannwhitneyu` — asks whether two groups differ in typical
+        value, with no normality assumption, which suits this bounded, non-normal feature).
         """
     )
     return
@@ -204,9 +476,8 @@ def _(HI, X, cu, mo, sex):
         xlabel="heading_alignment", title="the same comparison as ECDFs")
     mo.vstack([
         mo.md("The violin (left) and the cumulative curves (right) tell the same story: male events sit "
-              "a little lower (more opposed headings). Note already that the ECDF makes the *consistent* "
-              "shift obvious while the violin's fat shapes almost hide it — hold that thought for "
-              "Section 2."),
+              "a little lower (more opposed headings). The ECDF shows the consistent shift more clearly "
+              "than the violin, whose fat shapes almost hide it; Section 2 returns to why."),
         mo.hstack([_violin, _ecdf], widths=[1, 1])])
     return
 
@@ -222,7 +493,7 @@ def _(HI, X, cu, mo, np, sex):
         is a p-value with eight zeros after the decimal point. Taken at face value it is overwhelming
         proof of a sex difference. It is also *dishonest*, because it counted 2,499 non-independent
         events as 2,499 independent facts. The test thinks it has 2,499 chances to be fooled by noise;
-        it really has 14. Let us give it the honest count.
+        it really has 14. We give it the honest count.
         """
     )
     return
@@ -388,12 +659,12 @@ def _(mo):
         r"""
         ### Flip the unit yourself, and watch the verdict change
 
-        This is the interactive heart of the section. Pick a **feature** and the **unit of analysis**.
-        At the *event* level we run a Mann–Whitney on all 2,499 events; at the *cage* level we run the
-        cage-permutation test on the 14 cage means. Nothing about the data changes — only which unit we
-        declare independent. Watch the positive control (`heading_alignment`) survive both while the
-        negative control (`appr_body_len`) is "significant" at the event level and ordinary at the cage
-        level. The lesson lives in that flip.
+        Pick a **feature** and the **unit of analysis**. At the *event* level we run a Mann–Whitney on
+        all 2,499 events; at the *cage* level we run the cage-permutation test on the 14 cage means.
+        Nothing about the data changes — only which unit we declare independent. The positive control
+        (`heading_alignment`) stays significant at both units; the negative control (`appr_body_len`)
+        is "significant" at the event level but ordinary at the cage level. That difference between the
+        two units, on the same numbers, is the point of the section.
         """
     )
     return
@@ -991,7 +1262,7 @@ def _(mo):
 
         ## Why this matters
 
-        The most dangerous mistakes are the ones that feel like careful work. **Circular analysis** —
+        Some mistakes are hard to catch because they feel like careful work. **Circular analysis** —
         also called *double-dipping* — is using the same data twice: once to **select** or **sort**
         something, and again to **test** it, without acknowledging that the selection already used the
         answer. The test then confirms a pattern the selection *put there*. It can manufacture
@@ -999,9 +1270,9 @@ def _(mo):
 
         ## 5.1 · Selection on noise — the clean demonstration
 
-        Here is the trap in its purest form, on data we *know* is meaningless. Generate a matrix of pure
-        random noise: 200 "events" × 400 "features", plus a random binary label with no relationship to
-        anything. Then:
+        Consider the trap in its simplest form, on data we *know* is meaningless. Generate a matrix of
+        pure random noise: 200 "events" × 400 "features", plus a random binary label with no
+        relationship to anything. Then:
 
         1. **Select** the 10 features that correlate most strongly with the label.
         2. **Test** those same 10 features against the same label.
@@ -1212,18 +1483,26 @@ def _(mo):
     mo.md(
         r"""
         ---
-        # 6 · Cross-validation leakage — the centerpiece
+        # 6 · Cross-validation leakage
 
         ## Why this matters
 
-        Cross-validation (CV) is supposed to be the honest way to estimate how a model does on data it
-        has never seen: split into folds, train on some, test on the rest, repeat. It is the single most
-        trusted number in a modeling paper. And it is quietly, spectacularly easy to break — by letting
-        information **leak** from the test fold into the training fold. When it breaks, it does not throw
-        an error; it just reports a number that is too good.
+        Cross-validation (CV) is the standard way to estimate how a model does on data it has never
+        seen: split into folds, train on some, test on the rest, repeat. It is often the single most
+        trusted number in a modeling paper, which is exactly why its failure mode is so consequential:
+        it is quietly easy to break by letting information **leak** from the test fold into the training
+        fold, and when it breaks it does not throw an error — it just reports a number that is too good.
+        This is the failure this whole notebook builds toward.
 
         ## Definitions
 
+        - **Decoder** — a model that predicts a label from many measurements taken at once. Here the
+          label is *social vs non-social* behavior and the measurements are the simultaneous activity
+          of ~218 neurons, read frame by frame. (Decoding is the subject of NB06; this section only
+          needs the idea.)
+        - **AUROC (area under the ROC curve)** — a single score for how well a decoder separates the
+          two classes: 0.5 is chance (no better than a coin flip), 1.0 is perfect. It is the number we
+          watch move under each CV scheme below.
         - **Temporal autocorrelation** — nearby-in-time samples are similar. A calcium trace changes
           slowly, so frame *t* and frame *t + 1* are almost the same measurement. Behavior states are
           sticky (NB06), so consecutive frames share a state.
@@ -1385,8 +1664,8 @@ def _(cu, go, mo, np):
     mo.vstack([_fig,
                mo.md("*Under random K-fold every red test frame is sandwiched between gray training "
                      "frames that are, for slow calcium, almost the same measurement — the model peeks. "
-                     "Under blocked CV the test frames are one contiguous novel stretch. This picture "
-                     "is the entire lesson of Section 6.*")])
+                     "Under blocked CV the test frames are one contiguous novel stretch, with no "
+                     "adjacent training frame to leak from.*")])
     return
 
 

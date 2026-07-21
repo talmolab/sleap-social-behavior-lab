@@ -149,7 +149,7 @@ def _(ex_cage, ex_gif, ex_idx, ex_sex, ex_tod, mo):
         f"""
         ### Our example interaction
 
-        We keep the same example event we have followed all week (event **#{ex_idx}**, cage
+        We keep the same example event we have followed throughout (event **#{ex_idx}**, cage
         **{ex_cage}**, a **{"female" if ex_sex == "F" else "male"}** cage). The two interacting mice are
         the **approacher** and the **approachee**; a third mouse is a **bystander**. Skeletons are
         colored **only by social rank** (<span style="color:#d62728">Dom = red</span>,
@@ -188,11 +188,22 @@ def _(mo):
 
         ## Terms, defined before we use them
 
+        - **Kinematics** — the measurable quantities of movement. Here, for each mouse, its *speed* (how
+          fast its body center moves, in pixels per second) and its *position* (where the body center
+          sits in the cage).
         - **State** — a coarse label for what the whole cage is doing at one moment. We use three:
           *rest*, *locomote* (moving, apart), and *huddle* (mice close together).
-        - **Markov chain** — a sequence of states in which the next state depends only on the *current*
-          state, not the entire history before it. Everyday analogy: weather that is "sunny" or
-          "rainy", where tomorrow's odds depend only on today.
+        - **Markov chain** — a sequence of states with one defining rule: the next state depends only on
+          the *current* state, not on the whole path taken to reach it. That rule is the **memoryless
+          property**. To predict what comes next you need only where the chain is right now; how it got
+          there is forgotten. A board-game token obeys the same rule — its next move depends only on the
+          square it sits on, not on the sequence of rolls that brought it there. Everyday analogy:
+          weather that is "sunny" or "rainy", where tomorrow's odds depend only on today.
+        - **Observed vs hidden states.** The three states here are **observed** — read directly off the
+          kinematics with a percentile threshold, so we can see the state of every frame. In many chains
+          the state is instead **hidden** (latent): never measured directly, only inferred from noisy
+          observations. A Markov chain whose states are hidden is a **hidden Markov model (HMM)**,
+          previewed at the end of Part A.
         - **Transition matrix** — a table `T` where `T[i, j]` is the probability of moving to state `j`
           next, given you are in state `i` now. Every row sums to 1.
         - **Stationary distribution** — the long-run fraction of time spent in each state if the chain
@@ -238,6 +249,9 @@ def _(mo):
         r"""
         ## A.2 · Turning kinematics into a state sequence
 
+        A **frame** is one sampled timepoint. This recording is sampled at **2 fps** (frames per second),
+        so two frames span one second and a 5-minute window is 600 frames.
+
         Before we can build a Markov chain we need a state label for every frame. `cu.discretize_states`
         does this.
 
@@ -253,9 +267,11 @@ def _(mo):
         - **huddle (2)** — the closest pair of mice is nearer than the 25th-percentile pair distance
           (a proxy for social proximity).
 
-        The result is the valid substrate for a Markov chain: a single unbroken ribbon of states, one
+        The result is the valid substrate for a Markov chain: a single unbroken sequence of states, one
         frame after the next. Below we recompute the states live from the raw kinematics and confirm
-        they reproduce the shipped `state_seq` exactly, then scrub a 5-minute window of the ribbon.
+        they reproduce the shipped `state_seq` exactly, then scrub a 5-minute window of a **state
+        ribbon** — a horizontal strip that paints one colored cell per frame, so an unbroken run of one
+        color is a run of one state.
         """
     )
     return
@@ -271,15 +287,15 @@ def _(cu, np, t15):
 
 @app.cell
 def _(mo):
-    ribbon_start = mo.ui.slider(0, 172200, value=54000, step=600,
-                                label="ribbon start frame (2 fps · window = 5 min)",
+    window_start = mo.ui.slider(0, 172200, value=54000, step=600,
+                                label="window start (frame index) — 600-frame / 5-min window at 2 frames per second",
                                 debounce=True, full_width=True)
-    return (ribbon_start,)
+    return (window_start,)
 
 
 @app.cell
-def _(STATE_COLORS, STATE_NAMES, go, mo, ribbon_start, states_match, t15):
-    _s0 = int(ribbon_start.value)
+def _(STATE_COLORS, STATE_NAMES, go, mo, states_match, t15, window_start):
+    _s0 = int(window_start.value)
     _win = 600
     _seg = t15["state_seq"][_s0:_s0 + _win]
     _tod0 = float(t15["tod_hour"][_s0])
@@ -297,7 +313,7 @@ def _(STATE_COLORS, STATE_NAMES, go, mo, ribbon_start, states_match, t15):
     _fig.update_xaxes(title="frames since window start (2 fps)", showgrid=False)
     _check = ("The live `discretize_states` reproduces the shipped `state_seq` exactly"
               if states_match else "Mismatch — using the shipped `state_seq`")
-    mo.vstack([ribbon_start, _fig,
+    mo.vstack([window_start, _fig,
                mo.md(f"*{_check}. The ribbon is **contiguous** — a real sequence in time, which is "
                      f"what a Markov chain requires. States: {', '.join(STATE_NAMES)}. Notice the long "
                      f"unbroken runs of one color: that stickiness is the memory we are about to "
@@ -327,7 +343,7 @@ def _(cu, np, t10, t13, t15):
     return CAGE_COLORS, grammar
 
 
-# ============================================================ NEW: how arbitrary are the state cuts?
+# ============================================================ how arbitrary are the state cuts?
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(
@@ -417,17 +433,86 @@ def _(mo):
         r"""
         ## A.3 · The transition matrix
 
-        A transition matrix summarizes the whole day's dynamics in one small table.
+        A transition matrix summarizes the whole day's dynamics in one small table. It has a picture
+        twin: a Markov chain can be drawn as **circles** (the states) joined by **arrows** (the
+        transition probabilities), and that diagram and the matrix hold exactly the same information.
 
-        **A tiny worked example first.** Suppose a cage has only two states, *rest* and *move*. If from
-        *rest* the mouse stays resting 80% of the time and starts moving 20%, and from *move* it keeps
-        moving 70% and settles to rest 30%, the transition matrix is:
+        **A tiny worked example first.** Suppose a cage has only two states, *rest* and *move*. From
+        *rest* the mouse stays resting 80% of the time and starts moving 20%; from *move* it keeps moving
+        70% and settles to rest 30%. The diagram below draws that chain.
+        """
+    )
+    return
+
+
+@app.cell(hide_code=True)
+def _(go, np):
+    _rest_xy, _move_xy = (0.0, 0.0), (3.0, 0.0)
+    _r = 0.42                                        # node radius
+    _COL = ("#9e9e9e", "#ff7f0e")                    # rest = gray, move = orange (match STATE_COLORS)
+    _schem = go.Figure()
+
+    def _add_loop(cx, cy, color, label):
+        # a self-loop drawn as an arc above the node, capped with an arrowhead pointing back in
+        _th = np.linspace(-0.35 * np.pi, 1.35 * np.pi, 60)
+        _lr = 0.30
+        _lcx, _lcy = cx, cy + _r + _lr * 0.9
+        _xs = _lcx + _lr * np.cos(_th)
+        _ys = _lcy + _lr * np.sin(_th)
+        _schem.add_scatter(x=_xs, y=_ys, mode="lines", line=dict(color=color, width=2.5),
+                           hoverinfo="skip", showlegend=False)
+        _schem.add_annotation(x=_xs[-1], y=_ys[-1], ax=_xs[-4], ay=_ys[-4],
+                              xref="x", yref="y", axref="x", ayref="y",
+                              showarrow=True, arrowhead=3, arrowsize=1.4, arrowwidth=2.5,
+                              arrowcolor=color, text="")
+        _schem.add_annotation(x=_lcx, y=_lcy + _lr + 0.16, text=label, showarrow=False,
+                              font=dict(size=15, color=color))
+
+    _add_loop(*_rest_xy, _COL[0], "stay 0.80")
+    _add_loop(*_move_xy, _COL[1], "stay 0.70")
+
+    # cross arrows: rest -> move (upper), move -> rest (lower)
+    _schem.add_annotation(x=_move_xy[0] - _r - 0.02, y=0.14, ax=_rest_xy[0] + _r + 0.02, ay=0.14,
+                          xref="x", yref="y", axref="x", ayref="y",
+                          showarrow=True, arrowhead=3, arrowsize=1.4, arrowwidth=2.5, arrowcolor="#555")
+    _schem.add_annotation(x=1.5, y=0.32, text="0.20", showarrow=False, font=dict(size=15, color="#555"))
+    _schem.add_annotation(x=_rest_xy[0] + _r + 0.02, y=-0.14, ax=_move_xy[0] - _r - 0.02, ay=-0.14,
+                          xref="x", yref="y", axref="x", ayref="y",
+                          showarrow=True, arrowhead=3, arrowsize=1.4, arrowwidth=2.5, arrowcolor="#555")
+    _schem.add_annotation(x=1.5, y=-0.32, text="0.30", showarrow=False, font=dict(size=15, color="#555"))
+
+    for (_cx, _cy), _col, _nm in [(_rest_xy, _COL[0], "rest"), (_move_xy, _COL[1], "move")]:
+        _schem.add_shape(type="circle", x0=_cx - _r, x1=_cx + _r, y0=_cy - _r, y1=_cy + _r,
+                         line=dict(color="white", width=2), fillcolor=_col, layer="above")
+        _schem.add_annotation(x=_cx, y=_cy, text=f"<b>{_nm}</b>", showarrow=False,
+                              font=dict(size=17, color="white"))
+
+    _schem.update_layout(template="plotly_white", height=340,
+                         title="A two-state Markov chain: circles are states, arrows are transitions",
+                         margin=dict(l=10, r=10, t=44, b=10))
+    _schem.update_xaxes(visible=False, range=[-1.1, 4.1])
+    _schem.update_yaxes(visible=False, range=[-0.9, 1.5], scaleanchor="x", scaleratio=1)
+    _schem
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(
+        r"""
+        Reading the diagram: each **circle** is a state; each **arrow** is a transition probability; a
+        **self-loop** is "stay in this state". The arrows leaving any one circle sum to 1, because from
+        wherever you are, something must happen next. And "memoryless" is exactly this picture: the
+        arrows you may follow depend only on the circle you are standing on — the diagram has no record
+        of how you arrived.
+
+        The same chain written as a table is the **transition matrix**:
 
         $$T = \begin{bmatrix} 0.8 & 0.2 \\ 0.3 & 0.7 \end{bmatrix}$$
 
-        Row 1 reads "given resting now, next is 0.8 rest / 0.2 move." Every row sums to 1. Large numbers
-        on the **diagonal** mean behavior is *sticky* (long dwells in one state); large **off-diagonal**
-        numbers mean it switches often.
+        Row 1 reads "given resting now, next is 0.8 rest / 0.2 move" — the two arrows leaving the *rest*
+        circle. Every row sums to 1. Large numbers on the **diagonal** (the stay-arrows) mean behavior is
+        *sticky* (long dwells in one state); large **off-diagonal** numbers mean it switches often.
 
         **The function.** `cu.transition_matrix(state_seq, n_states)`:
 
@@ -497,8 +582,9 @@ def _(mo):
         - **Input** — the transition matrix `T` and the number of walker steps.
         - **Output** — a vector of fractions, one per state, summing to 1.
 
-        This slider teaches a statistical fact, not just an animation: a **Monte-Carlo estimate is noisy
-        and only converges with sample size.** At a few hundred steps the walker's tally still wobbles
+        This slider teaches a statistical fact, not just an animation. Estimating a quantity by repeated
+        random sampling is called a **Monte-Carlo estimate**, and such an estimate is **noisy and only
+        converges with sample size.** At a few hundred steps the walker's tally still wobbles
         several percent away from the truth (open diamonds); drag toward a few thousand and watch the
         gap shrink. The estimate is *unbiased* but only *low-variance* once you draw enough steps — the
         same reason a coin looks unfair after 10 flips and fair after 10,000.
@@ -551,7 +637,9 @@ def _(mo):
             picks the eigenvector whose eigenvalue is closest to 1, and normalizes it to sum to 1. The
             simulation and the eigenvector agree to within a few parts per thousand. We show the walker
             because it *is* the definition; the eigenvector is just the fast route to the same answer.
-            (It requires the chain to be irreducible and aperiodic, which ours is.)
+            (It requires the chain to be *irreducible and aperiodic* — every state can eventually be
+            reached from every other, and the chain does not lock into a fixed repeating cycle — which
+            ours is.)
             """
         )
     })
@@ -641,8 +729,7 @@ def _(CAGE_COLORS, cu, go, grammar, mo, np):
 # ============================================================ Activity clock
 @app.cell
 def _(cu, t10, t13, t15):
-    # Wider 60-min bins (smoother clock, less bin-to-bin jitter); we no longer draw the near-zero
-    # bootstrap ribbon since at this sampling it is thinner than the line itself.
+    # 60-min bins.
     clocks = {c: cu.activity_by_tod(tr["speed"], tr["tod_hour"], bin_min=60, n_boot=200, seed=0)
               for c, tr in {"15": t15, "10": t10, "13": t13}.items()}
     return (clocks,)
@@ -706,16 +793,16 @@ def _(mo):
         The grammar and clock are summaries. It helps to *see* what "structure in time" looks like
         inside single events. Two illustrations, each rendered on demand:
 
-        1. **Fast, jittery motion vs. smooth, slow motion.** For each event we can measure the dominant
-           frequency of the approacher's movement (the spectral centre of its speed). High-frequency
-           events look twitchy and quick; low-frequency events glide. This is the per-event echo of the
-           rhythm we saw across the day.
+        1. **Fast, jittery motion vs. smooth, slow motion.** For each event we can measure the
+           approacher's dominant movement frequency — how many times per second its speed rises and
+           falls. High-frequency events look twitchy and quick; low-frequency events glide. This is the
+           per-event echo of the rhythm we saw across the day.
         2. **A coordinated pair vs. an independent pair.** For each event we can cross-correlate the two
            mice's speeds over small time lags. A strongly correlated pair moves *together* — starting
            and stopping in lockstep — the signature of an interaction. A weakly correlated pair moves
            independently, as if sharing a cage but not a moment.
 
-        Rendering skeleton GIFs is the slow part, so each grid is behind a button.
+        Click a button to render each grid.
         """
     )
     return
@@ -951,7 +1038,7 @@ def _(mo):
         *sticky* — behavior dwells in its current state far more than a memoryless process would — and
         that memory beats a time-shuffled null in the same direction across three cages, at every
         reasonable choice of state cut. Activity also follows a clear daily rhythm, concentrated in the
-        dark active phase. We now have a baseline grammar and clock: the prerequisite for ever claiming
+        dark active phase. We have established a baseline grammar and clock: the prerequisite for ever claiming
         a manipulation *changed* how behavior moves through time.
 
         **A note on the tool we chose, and one we did not.** We modeled the dynamics as a *Markov chain*
@@ -1009,6 +1096,9 @@ def _(mo):
         - **Precision & recall.** At a fixed threshold: *precision* is, of the events called aggression,
           the fraction that really were. *Recall* is, of the events that really were aggression, the
           fraction caught. Raising the threshold usually raises precision but lowers recall.
+        - **Base rate.** The fraction of all events that truly are the positive class — here,
+          aggression. In the training cages the base rate is 0.32, meaning aggression is the minority
+          class; a decoder's scores are anchored to whatever base rate it was trained on.
         """
     )
     return
@@ -1018,9 +1108,9 @@ def _(mo):
 @app.cell
 def _(X, Xh, np):
     # The decoder we pin all our numbers to: median-impute -> standardize -> LOGISTIC REGRESSION.
-    # Logistic regression is a linear classifier; it is fast, interpretable, and — as we will see —
-    # actually BETTER than a small neural network on this problem, which tells us the classes are
-    # close to linearly separable in feature space. This fits in ~1s and renders on load.
+    # Logistic regression is a linear classifier; it is fast, interpretable, and better than a small
+    # neural network on this problem, because the classes are close to linearly separable in feature
+    # space.
     from sklearn.pipeline import Pipeline
     from sklearn.preprocessing import StandardScaler
     from sklearn.impute import SimpleImputer
@@ -1089,8 +1179,6 @@ def _(mo):
 
 @app.cell
 def _(cu, s_ho, yh):
-    # The subplot titles already report AUC and AP; we add only a non-redundant supertitle for context
-    # and raise the top margin so it clears the two subplot titles (no title-over-title collision).
     roc_fig = cu.roc_pr_fig(yh, s_ho)
     roc_fig.update_layout(
         title=dict(text="cam16 held-out — ROC and precision–recall curves",
@@ -1209,11 +1297,11 @@ def _(mo):
           decision boundaries — do better? `cu.make_mlp()` builds that MLP pipeline.
         - **Features.** Do we gain by feeding the decoder the raw **19 features**, the **PCA scores**
           from the dimensionality-reduction notebook, or the **19 features plus a one-hot code for
-          cluster membership** from the map?
+          cluster membership** from the map? A *one-hot code* adds one column per cluster, set to 1 for
+          the cluster an event belongs to and 0 in every other column.
 
-        Cross-validation gives five held-out AUROC values per configuration. Instead of a bar of means,
-        we plot **all five fold values** as points so the spread is visible. This refits many models, so
-        it runs on a button.
+        Cross-validation gives five held-out AUROC values per configuration. Each dot is one held-out
+        fold; the spread shows fold-to-fold variability. This refits many models, so click to run.
         """
     )
     return
@@ -1267,7 +1355,7 @@ def _(X, cu, der, featureset_btn, make_lr, mo, np, sweep, y):
 def _(mo):
     mo.md(
         r"""
-        Two results, stated plainly.
+        Two results.
 
         First, the **MLP is uniformly *worse* than the linear logistic regression** — across all three
         feature sets its fold cloud sits clearly below the logistic cloud (roughly 0.82 vs 0.85). This is
@@ -1289,7 +1377,8 @@ def _(mo):
         snippets — no two rows are neighbors in time, so a random split cannot leak a row's neighbor into
         the training set. Re-running with a <b>blocked</b> (contiguous-in-time) split gives essentially
         the same AUROC (≈ 0.850 either way). Hold onto that: for the <i>continuous</i> neural recordings
-        in Week 2, adjacent frames are highly correlated, a random split <i>does</i> leak, and the honest
+        in the neural notebooks that follow, adjacent frames are highly correlated, a random split
+        <i>does</i> leak, and the honest
         blocked number is far lower. Notebook 5 dissects exactly that failure.
         </div>
         """
@@ -1320,9 +1409,8 @@ def _(mo):
           with the training cohort. If performance holds, the decoder is reading *behavior*, not the
           fingerprint of one dataset.
 
-        Below, the within-cohort 5-fold CV folds, the single cam16 held-out value, and the two LOCO
-        values are shown as individual points. Because LOCO and cam16 are each a *single* number, we
-        suppress the mean line for those groups (a one-point "mean" would misleadingly read as a bar).
+        Below, the within-cohort 5-fold CV folds are shown as individual points with a mean line; the
+        single cam16 held-out value and the two LOCO values are single numbers, drawn as diamonds.
         """
     )
     return
@@ -1350,9 +1438,8 @@ def _(X, cohort, cu, make_lr, np, res_ho, y):
 
 @app.cell
 def _(cam16_auc, cu, cv_folds, go, loco_scores, mo, np):
-    # Hand-built so we can keep a mean line ONLY for the 5-fold-CV group (5 real points) and draw the
-    # single-value groups (cam16, the two LOCO tests) as bare diamonds — a one-point "mean" line would
-    # misread as a bar. Categorical x positions are integers with named ticks.
+    # Mean line for the 5-fold-CV group (5 points); single-value groups (cam16, the two LOCO tests) as
+    # bare diamonds. Categorical x positions are integers with named ticks.
     _tags = sorted(loco_scores)
     _ticks = (["within-cohort\n5-fold CV", "cam16 held-out\n(1 cage)"]
               + [f"LOCO → test {t}" for t in _tags])
@@ -1408,7 +1495,7 @@ def _(mo):
         - **Inputs** — the fitted model, `Xh`, `yh`.
         - **Output** — a mean drop (with spread over repeats) per feature.
 
-        It re-scores many times, so it runs on a button.
+        It re-scores many times, so click to run.
         """
     )
     return
@@ -1564,8 +1651,8 @@ def _(mo):
         A decoder can only be as reliable as the labels it learns from. If some hand labels are wrong at
         the boundary (and identity from tail marks already carries roughly 16% error), then even a
         perfect model inherits that error. We can show it directly: flip a fraction of the *training*
-        labels on purpose and watch held-out cam16 AUROC fall. This refits several models, so it runs on
-        a button.
+        labels on purpose and watch held-out cam16 AUROC fall. This refits several models, so click to
+        run.
 
         Read the curve for its *shape*, not a single point. Logistic regression is fairly **robust to a
         little label noise** — a standardized linear fit averages over many events, so flipping 5–10% of
@@ -1764,17 +1851,17 @@ def _(mo):
     return
 
 
-# ============================================================ Close Week 1 -> Week 2
+# ============================================================ Close the behavior arc -> the brain
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(
         r"""
         ---
-        # Closing Week 1 — and the question that opens Week 2
+        # Closing the behavior arc — the turn to the brain
 
-        **What we established this week.** Starting from raw SLEAP keypoints, we built a body-frame
-        feature representation, reduced it, mapped it, learned to read results honestly, and — in this
-        notebook — added the two capstones:
+        **What we established across the behavior notebooks.** Starting from raw SLEAP keypoints, we
+        built a body-frame feature representation, reduced it, mapped it, learned to read results
+        honestly, and — in this notebook — added the two capstones:
 
         - **Behavior has structure in time.** The state grammar is sticky — it carries real memory that
           beats a shuffled null across cages and across every reasonable choice of state cut — and
@@ -1788,8 +1875,8 @@ def _(mo):
         We can **read behavior**. That is the foundation of everything that follows.
 
         **The next question.** Behavior is produced by a brain. Having built an objective readout of
-        *what* an animal does, Week 2 turns to *how the brain produces it*: we move from tracking bodies
-        to reading neurons. The same discipline carries over — extract a clean signal, reduce it, find
+        *what* an animal does, the notebooks that follow turn to *how the brain produces it*: we move
+        from tracking bodies to reading neurons. The same discipline carries over — extract a clean signal, reduce it, find
         structure, and decode it honestly on held-out data — but now the raw data is a microscope movie
         of neural activity rather than a video of moving mice, and the analysis pipeline meets a new
         problem: the "nodes" are no longer 15 given keypoints but an unknown number of overlapping
