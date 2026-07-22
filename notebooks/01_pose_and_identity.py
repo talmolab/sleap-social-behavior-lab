@@ -289,32 +289,20 @@ def _(cu, ex_kp, mo):
 
 
 @app.cell
-def _(cu, ex_cols, ex_kp, mo, np):
-    # A labelled diagram of the 15 keypoints and how they connect, drawn from one real pose (the
-    # approacher's most-complete frame, colored by its rank, Sub = green), with a photograph of the
-    # same animal beneath so the schematic reads as an abstraction of a real mouse.
+def _(cu, mo):
+    # The 15 keypoints and their skeleton edges drawn directly on the video frame the pose was traced
+    # from, so each labelled landmark can be read against the real body it marks.
     import base64
-    _nfin = np.isfinite(ex_kp[:, 0]).all(axis=2).sum(axis=1)   # tracked-node count per frame
-    _best = int(np.argmax(_nfin))
-    _pose = ex_kp[_best, 0]                                    # (15, 2) one mouse, one frame
-    _fig = cu.labelled_skeleton_fig(
-        _pose, color=ex_cols[0],
-        title="The 15-keypoint SLEAP skeleton (approacher, Sub = green)")
-    # Widen the right margin AND disable cliponaxis so the 'tail_tip' text label isn't clipped at the
-    # plot-area edge (plotly clips scatter text at the axes by default).
-    _fig.update_traces(cliponaxis=False)
-    _fig.update_layout(margin=dict(l=10, r=200, t=40, b=10))
-    with open(cu.data_path("data/assets/nb01_mouse_photo.png"), "rb") as _fh:
+    with open(cu.data_path("data/assets/nb01_mouse_skeleton_overlay.png"), "rb") as _fh:
         _b64 = base64.b64encode(_fh.read()).decode()
-    _photo = mo.Html(
+    _overlay = mo.Html(
         f'<img src="data:image/png;base64,{_b64}" '
-        'style="max-width:440px;width:100%;border:1px solid #ddd;border-radius:6px">')
+        'style="max-width:620px;width:100%;border:1px solid #ddd;border-radius:6px">')
     mo.vstack([
-        _fig,
-        mo.md("*The mouse the pose above is traced from — a single video frame of one animal in its "
-              "homecage. Each keypoint in the schematic marks a landmark on this body: the nose and "
-              "head at the front, the tail chain trailing behind.*"),
-        _photo,
+        _overlay,
+        mo.md("*The 15-keypoint SLEAP skeleton overlaid on the single video frame it was traced from. "
+              "Each numbered dot is a keypoint and each line is a skeleton edge: the nose and head "
+              "anchor the front, the tail chain trails behind.*"),
     ])
     return
 
@@ -329,8 +317,7 @@ def _(mo):
         — haunches, trunk, and the four tail keypoints (`tail_1`, `tail_0`, `tail_2`, `tail_tip`). Keep
         this picture in mind: when we later talk about a keypoint dropping out, or two mice being
         confused, this is the object it happens to. The head-to-TTI axis is also the mouse's facing
-        direction, which becomes central in NB02. The photograph beneath the diagram is the animal the
-        pose was traced from; every dot in the schematic marks a landmark on that real body.
+        direction, which becomes central in NB02.
         """
     )
     return
