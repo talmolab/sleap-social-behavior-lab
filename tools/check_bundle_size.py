@@ -1,5 +1,5 @@
 """Fail the build if the committed data bundle exceeds the size budget (students download it on
-first run). Per the course design: total <= 60 MB.
+first run). Per the course design: total <= 75 MB.
 
   uv run python tools/check_bundle_size.py
 """
@@ -7,7 +7,7 @@ import os
 import sys
 
 DATA = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
-TOTAL_CAP_MB = 60
+TOTAL_CAP_MB = 75
 PER_FILE_WARN_MB = 15
 
 

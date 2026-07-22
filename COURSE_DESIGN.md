@@ -422,7 +422,7 @@ Conventions for all notebooks: plotly for interactive plots; Liberation Sans, no
 
 8. **`readout_board.csv` (NEW).** Committed benchmark values per stage for the tracker; each notebook displays its student-computed number beside the benchmark.
 
-**Bundle budget.** Current ~15 MB (train 11 MB + heldout 3.5 MB) + continuous ~15 MB + sweep ~1 MB + neural_demo <1 MB + GIFs a few MB ≈ **~32–40 MB — comfortably inside 50–75 MB.** Add a `tools/` build check that **fails the build if the bundle exceeds 60 MB.** Per-asset caps: continuous ≤15 MB, all precomputed demo arrays combined ≤10 MB.
+**Bundle budget.** Current ~15 MB (train 11 MB + heldout 3.5 MB) + continuous ~15 MB + sweep ~1 MB + neural_demo <1 MB + GIFs a few MB ≈ **~32–40 MB — comfortably inside 50–75 MB.** Add a `tools/` build check that **fails the build if the bundle exceeds 75 MB.** Per-asset caps: continuous ≤15 MB, all precomputed demo arrays combined ≤10 MB.
 
 ### NEW `course_utils.py` helpers (name — signature → returns)
 

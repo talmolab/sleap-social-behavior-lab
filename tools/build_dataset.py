@@ -49,7 +49,7 @@ SEED = 7
 rng = np.random.RandomState(SEED)
 
 # per-set caps — raised for the 2-cohort bundle so both cohorts and both sexes are well represented
-# (stratified() spreads by cohort). Kept so the committed bundle stays well under the 60 MB budget.
+# (stratified() spreads by cohort). Kept so the committed bundle stays within the 75 MB budget.
 TRAIN_CAPS = dict(aggression=800, mlp_fp=500, other=400, background=800)
 HELD_CAPS = dict(aggression=300, mlp_fp=130, other=100, background=250)
 OTHER_CATS = ["bystander_ledge", "anogenital", "side_kissing", "grooming", "mounting",
